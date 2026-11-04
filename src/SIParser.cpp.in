@@ -1,0 +1,2 @@
+// Compile the existing implementation without copying or modifying its logic.
+#include "@SI_SOURCE_DIR@/src/GaussianParser.cpp"

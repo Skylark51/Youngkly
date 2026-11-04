@@ -1,0 +1,164 @@
+{
+  "sheet_url": "https://docs.google.com/spreadsheets/d/1swFuOm_Uh5gfbOxmnUawi7Tt7T8p0O4IiW-tse_7uCc/edit?gid=601555075",
+  "xlsx_url": "https://docs.google.com/spreadsheets/d/1swFuOm_Uh5gfbOxmnUawi7Tt7T8p0O4IiW-tse_7uCc/export?format=xlsx",
+  "gid": "601555075",
+  "reference_docx": "주간_연구_보고서_이영섭_10월_3주차_261014.docx",
+  "project_heading": "1) Aldehyde deformylation (김효경 학생)",
+  "phrases_file": "config/phrases.ko.json",
+  "narrative_energy_column": "N",
+  "sheet_name": "3. Hydroperoxo Formation",
+  "image_width_cm": 5,
+  "render_image_long_edge_px": 3000,
+  "render_animation_long_edge_px": 1280,
+  "energy_tolerance_kcal": 0.02,
+  "spin_change_threshold": 0.2,
+  "distance_change_threshold_angstrom": 0.15,
+  "search_timeout_ms": 60000,
+  "reaction_rules": {
+    "From peroxo to hydroperoxo": {
+      "c_h_activation": false
+    }
+  },
+  "servers": [
+    {
+      "name": "lion",
+      "destination": "skylark@lion.jbnu.ac.kr",
+      "ssh_args": [
+        "-p",
+        "10022",
+        "-i",
+        "~/.ssh/id_ed25519_cmd_shortcuts",
+        "-o",
+        "IdentitiesOnly=yes"
+      ],
+      "roots": [
+        "/home/skylark"
+      ]
+    },
+    {
+      "name": "dumbo",
+      "destination": "26c093r2@dlogin01.usc.unist.ac.kr",
+      "ssh_args": [
+        "-p",
+        "2123",
+        "-i",
+        "~/.ssh/unist_hpc_dumbo",
+        "-o",
+        "IdentitiesOnly=yes"
+      ],
+      "roots": [
+        "/gpfs/home/26c093r2"
+      ]
+    },
+    {
+      "name": "tachyon",
+      "destination": "26c093r2@Tlogin02.usc.unist.ac.kr",
+      "ssh_args": [
+        "-p",
+        "2022",
+        "-i",
+        "~/.ssh/unist_hpc_tachyon",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "HostKeyAlgorithms=+ssh-rsa",
+        "-o",
+        "PubkeyAcceptedAlgorithms=+ssh-rsa"
+      ],
+      "roots": [
+        "/home2/26c093r2"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "aldehyde",
+      "spreadsheet_id": "1swFuOm_Uh5gfbOxmnUawi7Tt7T8p0O4IiW-tse_7uCc",
+      "project_heading": "Aldehyde deformylation (김효경 학생)",
+      "tabs": [
+        "3. Hydroperoxo Formation"
+      ]
+    },
+    {
+      "id": "innocore-jdh",
+      "spreadsheet_id": "1X-b8hEExl6dM5EWxFP1VLlNpp4cm4FOxN1PrlKWlweM",
+      "project_heading": "InnoCORE (정동현 박사)",
+      "tabs": [
+        "정박사님"
+      ]
+    },
+    {
+      "id": "innocore-cjs",
+      "spreadsheet_id": "1X-b8hEExl6dM5EWxFP1VLlNpp4cm4FOxN1PrlKWlweM",
+      "project_heading": "InnoCORE (최지수 박사)",
+      "tabs": [
+        "최박사님"
+      ]
+    },
+    {
+      "id": "feno6",
+      "spreadsheet_id": "12RtwDc6p2R8dPJwyWNzNYfaI3reSKvo42LCcwPzunaE",
+      "project_heading": "{FeNO}^{6} (전영진 학생)",
+      "tabs": [
+        "0. FeNO6 & FeNO7",
+        "1. HNO2 binding",
+        "2. HNO2 protonation by HOTf",
+        "3. N-O bond cleavage by HOTf",
+        "3-2. (TPADP) N-O bond cleavage",
+        "4. FeNO spin surfaces",
+        "5. Fe-NO2  Fe-HNO2 binding mode",
+        "6. TD-DFT",
+        "P1. FeII(Me3-TPADP) fragment sp",
+        "7. 전자를 먼저 넣는 경우",
+        "2022 이명학 아카이브 단어"
+      ]
+    },
+    {
+      "id": "co-peroxo-photo",
+      "spreadsheet_id": "1-AzHtKLjet6sRdT3Z7OnhTMgS5kTwsJSC_C3SGwCPZc",
+      "project_heading": "Co(III)-peroxo photocleavage (정준 학생)",
+      "tabs": [
+        "Main Mechanism",
+        "Sub 1. Rebound",
+        "Sub 2. Radical Coupling",
+        "받은 구조에서 investigation",
+        "메커니즘 검증",
+        "TD-DFT"
+      ]
+    },
+    {
+      "id": "cono7",
+      "spreadsheet_id": "1HqUr8T_eHQCxoDe9OBtKCicplarNwbG6aXT50gg3RvM",
+      "project_heading": "{CoNO}^{7} (전영진 학생)",
+      "tabs": [
+        "1. CoNO7  Co-Nitrite"
+      ]
+    }
+  ],
+  "interactive_rendering": true,
+  "include_dispersion": true,
+  "include_complexation": true,
+  "download_concurrency": 3,
+  "future_work_file": "config/future-work.json",
+  "angle_change_threshold_degrees": 5,
+  "report_layout": {
+    "table_text_gap_pt": 8,
+    "block_gap_pt": 12,
+    "cell_horizontal_pt": 4,
+    "cell_vertical_pt": 3,
+    "table_font_pt": 9,
+    "wide_table_font_pt": 8,
+    "energy_column_weights": [
+      1.4,
+      0.85,
+      0.85,
+      0.85,
+      0.85,
+      1.15,
+      0.85,
+      1.2,
+      1.65,
+      0.85
+    ]
+  }
+}

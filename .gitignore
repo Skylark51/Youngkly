@@ -1,0 +1,12 @@
+build/
+build-*/
+.youngkly/
+outputs/
+*.user
+*.exe
+*.lnk
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example

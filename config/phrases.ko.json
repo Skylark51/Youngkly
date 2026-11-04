@@ -1,0 +1,23 @@
+{
+  "status": "new_draft_in_user_style",
+  "energy": "계산된 transition state energy barrier는 약 {barrier} kcal/mol로 나타났으며, 생성된 intermediate의 에너지는 {product} kcal/mol로 나타났습니다.",
+  "spin_increase": "{label}의 spin density는 {s0}, {s1}, {s2}에서 각각 {v0}{unit}, {v1}{unit}, {v2}{unit}로 증가하였습니다.",
+  "spin_decrease": "{label}의 spin density는 {s0}, {s1}, {s2}에서 각각 {v0}{unit}, {v1}{unit}, {v2}{unit}로 감소하였습니다.",
+  "spin_ts_peak": "{label}의 spin density는 {s1}에서 {v1}{unit}까지 증가하였으나, {s2}에서는 {v2}{unit}로 다시 감소하였습니다.",
+  "spin_ts_valley": "{label}의 spin density는 {s1}에서 {v1}{unit}까지 감소하였으나, {s2}에서는 {v2}{unit}로 다시 증가하였습니다.",
+  "spin_same": "{label}의 spin density는 세 구조에서 모두 {v0}{unit}로 나타났습니다.",
+  "spin_small": "{label}의 spin density는 {min}–{max}{unit} 범위로, 세 구조 사이의 변화는 크지 않았습니다.",
+  "spin_sequence": "{label}의 spin density는 {s0}, {s1}, {s2}에서 각각 {v0}{unit}, {v1}{unit}, {v2}{unit}로 나타났습니다.",
+  "geometry_increase": "{label}는 {s0}, {s1}, {s2}에서 각각 {v0}{unit}, {v1}{unit}, {v2}{unit}로 증가하였습니다.",
+  "geometry_decrease": "{label}는 {s0}, {s1}, {s2}에서 각각 {v0}{unit}, {v1}{unit}, {v2}{unit}로 감소하였습니다.",
+  "geometry_ts_peak": "{label}는 {s1}에서 {v1}{unit}까지 증가하였으나, {s2}에서는 {v2}{unit}로 다시 감소하였습니다.",
+  "geometry_ts_valley": "{label}는 {s1}에서 {v1}{unit}까지 감소하였으나, {s2}에서는 {v2}{unit}로 다시 증가하였습니다.",
+  "geometry_same": "{label}는 세 구조에서 모두 {v0}{unit}로 나타났습니다.",
+  "geometry_small": "{label}는 {min}–{max}{unit} 범위로, 세 구조 사이의 변화는 크지 않았습니다.",
+  "geometry_sequence": "{label}는 {s0}, {s1}, {s2}에서 각각 {v0}{unit}, {v1}{unit}, {v2}{unit}로 나타났습니다.",
+  "spin_sign_change": "{label}의 spin density는 {s0}, {s1}, {s2}에서 각각 {v0}, {v1}, {v2}로 나타났으며, 경로 중 부호가 바뀌었습니다.",
+  "spin_combined": "{labels}의 spin density는 {states} 순서로 각각 {values}로 {direction}.",
+  "geometry_combined": "{labels} {metric}는 {states} 순서로 각각 {values}로 {direction}.",
+  "geometry_combined_ts_peak": "{labels} {metric}는 {s1}에서 각각 {middle}까지 증가하였으나, {s2}에서는 {endpoint}로 다시 감소하였습니다.",
+  "geometry_combined_ts_valley": "{labels} {metric}는 {s1}에서 각각 {middle}까지 감소하였으나, {s2}에서는 {endpoint}로 다시 증가하였습니다."
+}
