@@ -55,6 +55,14 @@ int main(int argc, char **argv) {
         check(siTable["bold_columns"].toArray() == QJsonArray{3, 9} && relativeCellText(0.2, 1) == "+0.20" &&
                   relativeCellText(0.0, 6) == "+0.00" && relativeCellText(1.2, 2) == "1.20",
               "SI correction signs and emphasis");
+        const auto siSpinLayout = siDocumentOrientation(QJsonObject{
+            {"headers", QJsonArray{"Atom", "Singlet", "Triplet"}},
+            {"rows", QJsonArray{QJsonArray{"Co1", 0.0, 1.5},
+                                 QJsonArray{"O2", 0.0, 0.5},
+                                 QJsonArray{"Rest", 0.0, 0.0}}}});
+        check(siSpinLayout["headers"].toArray() == QJsonArray{"Atom", "Co1", "O2", "Rest"} &&
+              siSpinLayout["rows"].toArray()[1].toArray() == QJsonArray{"Triplet", 1.5, 0.5, 0.0},
+              "SI Generator document table is structure-per-row");
         check(siRelativeTable(sheetEnergyRows, false, false)["headers"].toArray().size() == 8,
               "SI optional column selection");
         Archive zip{{"a.xml", "<a>한글</a>"}, {"b.txt", "fixture"}};
