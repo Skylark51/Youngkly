@@ -22,6 +22,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
+#include <QListWidget>
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPlainTextEdit>
@@ -76,7 +77,16 @@ class Window : public QMainWindow {
         date->setVerticalHeaderFormat(QCalendarWidget::NoVerticalHeader);
         date->setFirstDayOfWeek(Qt::Monday);
         dateLayout->addWidget(date);
-        dateLayout->addStretch();
+        dateLayout->addWidget(new QLabel("저장된 보고서 프로젝트"));
+        projectList = new QListWidget;
+        projectList->setObjectName("savedReportProjects");
+        projectList->setWordWrap(true);
+        projectList->setMinimumHeight(120);
+        projectList->setMaximumHeight(210);
+        dateLayout->addWidget(projectList, 1);
+        connect(projectList, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
+            if (!item->data(Qt::UserRole).toString().isEmpty()) loadProjectPath(item->data(Qt::UserRole).toString(), false);
+        });
         selection->addWidget(dateBox);
         auto *box = new QGroupBox("보고서에 포함할 연구");
         auto *choices = new QVBoxLayout(box);
@@ -184,19 +194,42 @@ class Window : public QMainWindow {
             QDir().mkpath("outputs");
             QDesktopServices::openUrl(QUrl::fromLocalFile(runDirectory.isEmpty() ? QDir(root).filePath("프로젝트 모음") : QFileInfo(runDirectory).absoluteFilePath()));
         });
+        refreshProjects();
+    }
+    void refreshProjects() {
+        const auto selected = projectList->currentItem() ? projectList->currentItem()->data(Qt::UserRole).toString() : QString();
+        projectList->clear();
+        QDirIterator files("프로젝트 모음", {"*.youngkly_project.json"}, QDir::Files, QDirIterator::Subdirectories);
+        while (files.hasNext()) {
+            const auto path = files.next();
+            if (QDir::fromNativeSeparators(path).contains("/자료/")) continue;
+            try {
+                const auto model = youngkly::loadConfig(path);
+                const auto label = model["project_name"].toString(QFileInfo(path).completeBaseName().replace(".youngkly_project", ""));
+                auto *item = new QListWidgetItem(label);
+                item->setData(Qt::UserRole, path); item->setToolTip(path);
+                // Insert by report date, newest first.
+                int index = 0;
+                while (index < projectList->count() && projectList->item(index)->data(Qt::UserRole + 1).toString() > model["report_date"].toString()) ++index;
+                item->setData(Qt::UserRole + 1, model["report_date"].toString());
+                projectList->insertItem(index, item);
+                if (path == selected || QFileInfo(path).absoluteFilePath() == QFileInfo(modelPath).absoluteFilePath()) projectList->setCurrentItem(item);
+            } catch (const std::exception &) { /* Ignore incomplete saves in the startup list. */ }
+        }
+        if (!projectList->count()) {
+            auto *empty = new QListWidgetItem("저장된 보고서가 없습니다.", projectList);
+            empty->setFlags(Qt::NoItemFlags);
+        }
     }
     void loadProject() {
+        const auto *item = projectList->currentItem();
+        if (!item || item->data(Qt::UserRole).toString().isEmpty()) {
+            projectList->setFocus(); status->setText("달력 아래에서 보고서 프로젝트를 선택하세요."); return;
+        }
+        loadProjectPath(item->data(Qt::UserRole).toString(), true);
+    }
+    void loadProjectPath(const QString &path, bool showPreview) {
         try {
-            QStringList labels, paths;
-            QDirIterator files("프로젝트 모음", {"*.youngkly_project.json"}, QDir::Files, QDirIterator::Subdirectories);
-            while (files.hasNext()) { const auto path = files.next(); if (!path.contains("/자료/")) paths << path; }
-            paths.sort(); std::reverse(paths.begin(), paths.end());
-            for (const auto &path : paths) labels << QFileInfo(path).completeBaseName().replace(".youngkly_project", "");
-            if (paths.isEmpty()) { status->setText("저장된 프로젝트가 없습니다. 프리뷰 생성·저장을 실행하세요."); return; }
-            bool ok = false;
-            const auto choice = QInputDialog::getItem(this, "저장 프로젝트", "주간 보고서 선택", labels, 0, false, &ok);
-            if (!ok) return;
-            const auto path = paths[labels.indexOf(choice)];
             const auto model = youngkly::loadConfig(path);
             const auto saved = youngkly::loadConfig(model["snapshot_config"].toString());
             modelPath = path; building = true; session = saved; sessionConfigPath = model["snapshot_config"].toString();
@@ -210,7 +243,8 @@ class Window : public QMainWindow {
             }
             dispersion->setChecked(saved["include_dispersion"].toBool(false));
             complexation->setChecked(saved["include_complexation"].toBool(false));
-            busy(false); status->setText("저장 프로젝트를 불러왔습니다. 갱신은 새 버전으로 저장됩니다."); previewReport();
+            busy(false); status->setText("보고서를 불러왔습니다. 프리뷰 확인·Word 열기·갱신을 사용할 수 있습니다.");
+            if (showPreview) previewReport();
         } catch (const std::exception &e) { fail(QString::fromUtf8(e.what())); }
     }
     void saveProjects() {
@@ -221,6 +255,7 @@ class Window : public QMainWindow {
             modelPath = paths.first(); runDirectory = QFileInfo(modelPath).absolutePath();
             sessionConfigPath = youngkly::loadConfig(modelPath)["snapshot_config"].toString();
         }
+        refreshProjects();
         for (const auto &path : paths) log->appendPlainText("프로젝트 저장: " + path);
     }
     bool configureDirections(const QJsonObject &model) {
@@ -519,6 +554,7 @@ class Window : public QMainWindow {
 
   private:
     void busy(bool value) {
+        projectList->setEnabled(!value);
         openWord->setEnabled(!value && QFileInfo::exists(output));
         createPreview->setEnabled(!value); loadSaved->setEnabled(!value);
         bool rendered = false;
@@ -560,6 +596,7 @@ class Window : public QMainWindow {
     QJsonObject config, session;
     QVector<QCheckBox *> checks;
     QCalendarWidget *date;
+    QListWidget *projectList;
     QPlainTextEdit *log;
     QPushButton *inspect, *generate, *open, *preview, *plans, *cancel, *selectAll, *clearAll;
     QLabel *status;
