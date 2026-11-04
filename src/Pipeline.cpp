@@ -227,8 +227,8 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
         if (!aligned)
             issues << "Atom counts or element order differ; explicit atom mapping is required";
         // Sheet formulas and their cached results remain the authoritative profile.
-        QJsonArray energyRows;
-        const auto rel = si::legacyRelativeEnergies(r, r.front(), false, false);
+        QJsonArray energyRows, componentChecks;
+        const auto rel = si::legacyRelativeEnergies(r, r.front(), true, true);
         const QStringList cols{"L", "M", "N", "O", "P", "Q", "R", "S"};
         const int termIndex[]{0, 1, 2, 3, 4, 5, 6, 8};
         bool energyMatch = true, complete = true, arithmeticMatch = true;
@@ -240,6 +240,7 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
         for (int i = 0; i < structureCount; ++i) {
             auto cells = sheetRows[ids[i]]["cells"].toObject();
             QJsonArray values{structureLabels[i]};
+            QJsonObject rowChecks;
             bool rowComplete = true;
             for (int c = 0; c < cols.size(); ++c) {
                 auto cell = cells[cols[c]].toObject();
@@ -253,21 +254,24 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
                 values << (ok ? QJsonValue(v) : QJsonValue(QJsonValue::Null));
                 if (!ok)
                     rowComplete = false;
-                if (c < 6 && ok && r[i].singlePoint && r.front().singlePoint &&
+                QString checkState = ok ? "not_applicable" : "missing";
+                const bool hasPrimaryAndSpe = r[i].singlePoint && r.front().singlePoint;
+                const bool canCompare = c < 6 ? hasPrimaryAndSpe :
+                    c == 6 && r[i].frequency.dispersion && r.front().frequency.dispersion;
+                if (c < 7 && ok && canCompare &&
                     rel[i].kcalTerms[termIndex[c]] && rel[0].kcalTerms[termIndex[c]]) {
                     bool baseOk;
-                    double base = sheetRows[ids[0]]["cells"]
-                                      .toObject()[cols[c]]
-                                      .toObject()["value"]
-                                      .toString()
-                                      .toDouble(&baseOk);
+                    const double base = sheetRows[ids[0]]["cells"].toObject()[cols[c]]
+                                            .toObject()["value"].toString().toDouble(&baseOk);
                     if (baseOk) {
-                        ++checkedTerms;
-                        if (std::abs((v - base) - *rel[i].kcalTerms[termIndex[c]]) >
-                            config["energy_tolerance_kcal"].toDouble(0.02))
-                            energyMatch = false;
+                        if (c < 6) ++checkedTerms;
+                        const bool matched = std::abs((v - base) - *rel[i].kcalTerms[termIndex[c]]) <=
+                            config["energy_tolerance_kcal"].toDouble(0.02);
+                        checkState = matched ? "matched" : "mismatch";
+                        if (!matched) energyMatch = false;
                     }
                 }
+                rowChecks[cols[c]] = checkState;
             }
             bool ok;
             double gv = cells[narrativeColumn].toObject()["value"].toString().toDouble(&ok);
@@ -278,10 +282,13 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
                 double sum = 0;
                 for (int c = 3; c <= 7; ++c)
                     sum += values[c].toDouble();
-                if (std::abs(sum - values[8].toDouble()) > config["energy_tolerance_kcal"].toDouble(0.02) ||
-                    std::abs(values[1].toDouble() + values[2].toDouble() - values[3].toDouble()) > 0.02)
-                    arithmeticMatch = false;
+                const bool rowArithmetic = std::abs(sum - values[8].toDouble()) <=
+                    config["energy_tolerance_kcal"].toDouble(0.02) &&
+                    std::abs(values[1].toDouble() + values[2].toDouble() - values[3].toDouble()) <= 0.02;
+                rowChecks["S"] = rowArithmetic ? "matched" : "mismatch";
+                if (!rowArithmetic) arithmeticMatch = false;
             }
+            componentChecks << QJsonObject{{"sheet_row", ids[i]}, {"states", rowChecks}};
             energyRows << values;
         }
         if (!energyMatch)
@@ -291,6 +298,7 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
         auto energyTable = siRelativeTable(energyRows, config["include_dispersion"].toBool(true),
                                            config["include_complexation"].toBool(true));
         energyTable["source"] = "sheet cached values with restored shared formulas in row cells";
+        energyTable["component_checks"] = componentChecks;
         energyTable["si_component_check"] = checkedTerms != structureCount * 6 ? "incomplete"
                                             : energyMatch      ? "matched"
                                                                : "mismatch";
