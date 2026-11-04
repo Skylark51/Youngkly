@@ -66,7 +66,7 @@ int main(int argc, char **argv) {
         verify(xml.count("<w:tbl>") == 3, "Missing three editable SI-format tables");
         verify(xml.count("w:fldSimple") >= 4, "Sequence captions absent");
         verify(xml.contains("Co1") && xml.contains("Reactant") && xml.contains("Mulliken"), "Spin table missing");
-        verify(xml.contains("w:sz=\\\"6\\\""), "Three-rule table border missing");
+        verify(xml.contains("w:sz=\"6\""), "Three-rule table border missing");
         int exportedPng = 0;
         for (const auto &name : parts.keys()) {
             if (name.startsWith("word/media/youngkly-") && name.endsWith(".png")) ++exportedPng;
