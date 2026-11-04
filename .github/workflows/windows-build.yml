@@ -1,0 +1,74 @@
+name: Youngkly Windows build
+
+on:
+  push:
+    branches: [main, 'feature/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: youngkly-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout Youngkly
+        uses: actions/checkout@v4
+        with:
+          path: Youngkly
+      - name: Checkout SI Generator
+        uses: actions/checkout@v4
+        with:
+          repository: Skylark51/SIGenerator
+          ref: 0a184a283622e7e47eb522b94f9c33bfbbb72917
+          path: SIGenerator
+      - name: Checkout Youngcraft
+        uses: actions/checkout@v4
+        with:
+          repository: Skylark51/YoungCraft
+          ref: a1f1f6e84c79becfe0b54c0a3e8c72152a5b62a0
+          path: Youngcraft
+      - name: Install MSYS2 and Qt
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-binutils
+      - name: Configure
+        shell: msys2 {0}
+        run: |
+          cmake -S Youngkly -B Youngkly/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSI_SOURCE_DIR="$PWD/SIGenerator/native" \
+            -DYOUNGCRAFT_SOURCE_DIR="$PWD/Youngcraft"
+      - name: Compile all targets
+        shell: msys2 {0}
+        run: |
+          cmake --build Youngkly/build --parallel 4
+      - name: Core regression tests
+        shell: msys2 {0}
+        run: |
+          ctest --test-dir Youngkly/build --output-on-failure -E render_controls
+      - name: Package single-file Windows executable
+        shell: msys2 {0}
+        run: |
+          cd Youngkly
+          "/c/Program Files/PowerShell/7/pwsh.exe" -NoProfile -File ./tools/package.ps1 -ToolRoot C:/ -BuildDirectory build -OutputPath outputs/package/Youngkly.exe
+          test -f outputs/package/Youngkly.exe
+      - name: Upload portable executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Youngkly-Windows-portable
+          path: Youngkly/outputs/package/Youngkly.exe
+          if-no-files-found: error

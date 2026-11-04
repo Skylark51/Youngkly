@@ -3,6 +3,7 @@
 #include "Pipeline.h"
 #include "Workspace.h"
 #include "RelativeTable.h"
+#include "si/StructureLabels.hpp"
 #include "FutureWork.h"
 #include "Narrative.h"
 #include <QDate>
@@ -163,7 +164,8 @@ QString table(const QJsonObject &t, int digits, const QJsonObject &layout, int p
         return {};
     int columns = heads.size();
     const bool energy = t["format"] == "SI Generator";
-    const double labelFraction = energy ? 0.16 : t.contains("atom_ids") ? 0.36 : 0.25;
+    const bool siOrientation = t["si_document_orientation"].toBool();
+    const double labelFraction = energy ? 0.16 : siOrientation ? 0.25 : t.contains("atom_ids") ? 0.36 : 0.25;
     QVector<int> widths(columns, 0);
     widths[0] = qRound(pageWidth * labelFraction);
     for (int i = 1; i < columns; ++i) widths[i] = (pageWidth - widths[0]) / qMax(1, columns - 1);
@@ -183,10 +185,10 @@ QString table(const QJsonObject &t, int digits, const QJsonObject &layout, int p
         widths.back() += pageWidth - std::accumulate(widths.begin(), widths.end(), 0);
     }
     QString out =
-        "<w:tbl><w:tblPr><w:tblW w:w=\"5000\" w:type=\"pct\"/><w:tblBorders><w:top w:val=\"single\" "
+        "<w:tbl><w:tblPr><w:tblW w:w=\"5000\" w:type=\"pct\"/><w:jc w:val=\"center\"/><w:tblBorders><w:top w:val=\"single\" "
         "w:sz=\"6\" w:color=\"000000\"/><w:left w:val=\"nil\"/><w:bottom w:val=\"single\" w:sz=\"6\" "
         "w:color=\"000000\"/><w:right w:val=\"nil\"/><w:insideH w:val=\"nil\"/><w:insideV "
-        "w:val=\"nil\"/></w:tblBorders><w:tblLayout w:type=\"fixed\"/><w:tblCellMar><w:left w:w=\"40\" "
+        "w:val=\"nil\"/></w:tblBorders><w:tblLayout w:type=\"autofit\"/><w:tblCellMar><w:left w:w=\"40\" "
         "w:type=\"dxa\"/><w:right w:w=\"40\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr><w:tblGrid>";
     const auto horizontal = qRound(layout["cell_horizontal_pt"].toDouble(4) * 20);
     const auto vertical = qRound(layout["cell_vertical_pt"].toDouble(3) * 20);
@@ -210,8 +212,8 @@ QString table(const QJsonObject &t, int digits, const QJsonObject &layout, int p
             xml += QString("<w:tc><w:tcPr><w:tcW w:w=\"%1\" w:type=\"dxa\"/>").arg(widths[i]);
             if (header)
                 xml +=
-                    "<w:tcBorders><w:bottom w:val=\"single\" w:sz=\"4\" w:color=\"000000\"/></w:tcBorders>";
-            const bool bold = header || t["bold_columns"].toArray().contains(i);
+                    "<w:tcBorders><w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"000000\"/></w:tcBorders>";
+            const bool bold = header || (siOrientation && i == 0) || t["bold_columns"].toArray().contains(i);
             QString properties = "<w:rFonts w:ascii=\"Times New Roman\" w:hAnsi=\"Times New Roman\" "
                                  "w:eastAsia=\"맑은 고딕\"/><w:sz w:val=\"" +
                                  QString::number(qRound(2 * layout[energy && columns > 8 ? "wide_table_font_pt" : "table_font_pt"].toDouble(energy && columns > 8 ? 8 : 9))) +
@@ -220,8 +222,9 @@ QString table(const QJsonObject &t, int digits, const QJsonObject &layout, int p
                    QString(keepNext ? "<w:keepNext/>" : "") +
                    "<w:jc w:val=\"center\"/><w:spacing "
                    "w:before=\"0\" w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/></w:pPr>";
-            xml += header ? scriptRuns(label, properties)
-                          : "<w:r><w:rPr>" + properties + "</w:rPr><w:t>" + escape(label) + "</w:t></w:r>";
+            if (!header && siOrientation && i == 0)
+                label = si::structureLabelMarkup(label);
+            xml += scriptRuns(label, properties);
             xml += "</w:p></w:tc>";
         }
         return xml + "</w:tr>";
@@ -241,6 +244,12 @@ void writeReport(const QString &reference, const QString &output, const QJsonObj
     auto oneBlankLine = [&](bool keep = false) { return gap(layout["table_text_gap_pt"].toDouble(8), keep); };
     auto blankLines = [&] { return gap(layout["block_gap_pt"].toDouble(12)); };
     auto package = readZip(reference);
+    // Do not propagate legacy notes, custom data and document property metadata.
+    for (const QString &name : package.keys()) {
+        if (name.startsWith("word/comments") || name.startsWith("customXml/") ||
+            name.startsWith("word/embeddings/") || name.startsWith("docProps/"))
+            package.remove(name);
+    }
     const auto original = package.value("word/document.xml");
     auto doc = parse(original);
     auto body = doc.documentElement().firstChildElement("w:body");
@@ -333,7 +342,45 @@ void writeReport(const QString &reference, const QString &output, const QJsonObj
     }
     auto rel = parse(package.value("word/_rels/document.xml.rels"));
     auto types = parse(package.value("[Content_Types].xml"));
+    // Discard source-document annotations, embedded objects, personal metadata
+    // and the corresponding relationship/content-type registrations.
+    auto removeLegacyRelationships = [](QDomDocument &document) {
+        auto nodes = document.elementsByTagName("Relationship");
+        for (int i = nodes.size() - 1; i >= 0; --i) {
+            auto item = nodes.at(i).toElement();
+            const auto target = item.attribute("Target"), type = item.attribute("Type");
+            if (target.contains("docProps/") || target.contains("customXml/") ||
+                target.contains("embeddings/") || type.contains("/comments") ||
+                type.contains("/people") || type.contains("/customXml"))
+                item.parentNode().removeChild(item);
+        }
+    };
+    removeLegacyRelationships(rel);
+    if (package.contains("_rels/.rels")) {
+        auto rootRelationships = parse(package.value("_rels/.rels"));
+        removeLegacyRelationships(rootRelationships);
+        package["_rels/.rels"] = rootRelationships.toByteArray();
+    }
+    auto overrides = types.elementsByTagName("Override");
+    for (int i = overrides.size() - 1; i >= 0; --i) {
+        auto item = overrides.at(i).toElement();
+        const auto name = item.attribute("PartName");
+        if (name.startsWith("/docProps/") || name.startsWith("/customXml/") ||
+            name.startsWith("/word/comments") || name.startsWith("/word/embeddings/"))
+            item.parentNode().removeChild(item);
+    }
     int imageId = 5000;
+    int figureNumber = 0;
+    int tableNumber = 0;
+    auto caption = [&](const QString &kind, int number, const QString &label) {
+        const auto sequence = kind == "Figure" ? "Figure_S" : "Table_S";
+        const auto prefix = "<w:r><w:rPr><w:b/></w:rPr><w:t>" + kind + " S</w:t></w:r>";
+        const auto field = QString("<w:fldSimple w:instr=\"SEQ %1 \\* ARABIC\"><w:r><w:rPr><w:b/></w:rPr><w:t>%2</w:t></w:r></w:fldSimple>")
+                               .arg(sequence).arg(number);
+        return "<w:p>" + serialize(normal.firstChildElement("w:pPr")) + prefix + field +
+               "<w:r><w:rPr><w:b/></w:rPr><w:t>. </w:t></w:r>" +
+               scriptRuns(label, "<w:rFonts w:ascii=\"Times New Roman\" w:eastAsia=\"맑은 고딕\"/>") + "</w:p>";
+    };
     previousHeading.clear();
     for (auto sectionValue : sections) {
         const auto sectionModel = sectionValue.toObject();
@@ -375,8 +422,8 @@ void writeReport(const QString &reference, const QString &output, const QJsonObj
                     content += "</w:p><w:p>" + serialize(normal.firstChildElement("w:pPr"));
                 ++captureIndex;
                 auto capture = value.toObject();
-                const auto path = capture.contains("animation") ? capture["animation"].toString()
-                                                                : capture["png"].toString();
+                // Use the publication-resolution still in Word; keep GIF as a separate asset.
+                const auto path = capture["png"].toString();
                 const auto ext = QFileInfo(path).suffix().toLower();
                 const auto bytes = readFile(path);
                 QImageReader reader(path);
@@ -428,9 +475,24 @@ void writeReport(const QString &reference, const QString &output, const QJsonObj
                         .arg(name, rid);
             }
             content += "</w:p>";
+            QStringList figureLabels;
+            for (const auto &label : group["structure_labels"].toArray()) figureLabels << label.toString();
+            if (figureLabels.isEmpty()) {
+                for (auto id : group["rows"].toArray()) {
+                    for (const auto &rowValue : sectionModel["rows"].toArray()) {
+                        const auto row = rowValue.toObject();
+                        if (row["sheet_row"] != id) continue;
+                        figureLabels << (row["role"] == "transition_state" ? "TS" :
+                            row["role"] == "irc_forward" ? "IRC forward" : "IRC reverse");
+                    }
+                }
+            }
+            content += caption("Figure", ++figureNumber,
+                group["section"].toString() + " — " + figureLabels.join(" / "));
             content += p(normal, "Relative energy (kcal/mol)", false, false, true);
             content += oneBlankLine(true);
             content += table(group["energy_table"].toObject(), 2, layout, pageWidth);
+            content += caption("Table", ++tableNumber, "Relative energy values of " + group["section"].toString() + " (kcal/mol).");
             content += oneBlankLine();
             content += p(
                 normal,
@@ -447,7 +509,8 @@ void writeReport(const QString &reference, const QString &output, const QJsonObj
             content += blankLines();
             content += p(normal, "Mulliken Spin Density (Def2-TZVPP)", false, false, true);
             content += oneBlankLine(true);
-            content += table(group["spin_table"].toObject(), 3, layout, pageWidth);
+            content += table(siDocumentOrientation(group["spin_table"].toObject()), 3, layout, pageWidth);
+            content += caption("Table", ++tableNumber, "Mulliken spin density distributions of " + group["section"].toString() + ".");
             content += oneBlankLine();
             for (const auto &value : group["paragraphs"].toArray()) {
                 auto paragraph = value.toObject();
@@ -459,7 +522,8 @@ void writeReport(const QString &reference, const QString &output, const QJsonObj
             for (auto ids : group["geometry_table"].toObject()["atom_ids"].toArray()) if (ids.toArray().size() > 2) hasAngles = true;
             content += p(normal, hasAngles ? "Selected Geometries (Å / °)" : "Selected Geometries (Å)", false, false, true);
             content += oneBlankLine(true);
-            content += table(group["geometry_table"].toObject(), 3, layout, pageWidth);
+            content += table(siDocumentOrientation(group["geometry_table"].toObject()), 3, layout, pageWidth);
+            content += caption("Table", ++tableNumber, "Selected geometries of " + group["section"].toString() + " (Å and °).");
             content += oneBlankLine();
             for (const auto &item : group["paragraphs"].toArray()) {
                 auto paragraph = item.toObject();
@@ -505,6 +569,21 @@ void writeReport(const QString &reference, const QString &output, const QJsonObj
     parse(package["word/document.xml"]);
     package["word/_rels/document.xml.rels"] = rel.toByteArray();
     package["[Content_Types].xml"] = types.toByteArray();
+    // Preserve only images referenced from the active OOXML relationship graphs.
+    QSet<QString> usedMedia;
+    for (auto it = package.constBegin(); it != package.constEnd(); ++it) {
+        if (!it.key().endsWith(".rels")) continue;
+        const auto relationships = parse(it.value()).elementsByTagName("Relationship");
+        for (int i = 0; i < relationships.size(); ++i) {
+            const auto item = relationships.at(i).toElement();
+            if (!item.attribute("Type").endsWith("/image")) continue;
+            auto target = item.attribute("Target");
+            if (target.startsWith("/word/media/")) usedMedia.insert(target.mid(1));
+            else if (target.startsWith("media/")) usedMedia.insert("word/" + target);
+        }
+    }
+    for (const auto &name : package.keys())
+        if (name.startsWith("word/media/") && !usedMedia.contains(name)) package.remove(name);
     auto settings = parse(package["word/settings.xml"]);
     auto update = settings.documentElement().firstChildElement("w:updateFields");
     if (update.isNull()) {

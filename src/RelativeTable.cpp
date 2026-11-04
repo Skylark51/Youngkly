@@ -2,6 +2,28 @@
 #include "si/SIModel.hpp"
 #include <cmath>
 namespace youngkly {
+// Transpose analysis-facing tables into SI Generator's structure-per-row document layout.
+QJsonObject siDocumentOrientation(const QJsonObject &source) {
+    const auto headers = source["headers"].toArray();
+    const auto rows = source["rows"].toArray();
+    if (headers.isEmpty()) return source;
+    QJsonArray outputHeaders{headers[0]}, outputRows;
+    for (const auto &value : rows)
+        outputHeaders << (value.toArray().isEmpty() ? QJsonValue(QJsonValue::Null) : value.toArray().at(0));
+    for (int column = 1; column < headers.size(); ++column) {
+        QJsonArray row{headers[column]};
+        for (const auto &value : rows) {
+            const auto cells = value.toArray();
+            row << (column < cells.size() ? cells[column] : QJsonValue(QJsonValue::Null));
+        }
+        outputRows << row;
+    }
+    auto result = source;
+    result["headers"] = outputHeaders;
+    result["rows"] = outputRows;
+    result["si_document_orientation"] = true;
+    return result;
+}
 QString relativeCellText(const QJsonValue &value, int logical, int digits) {
     if (value.isNull() || value.isUndefined())
         return "N/A";

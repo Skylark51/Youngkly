@@ -1,5 +1,6 @@
 #include "Archive.h"
 #include "Pipeline.h"
+#include "RelativeTable.h"
 #include "Workspace.h"
 #include "FutureEditor.h"
 #include "FutureWork.h"
@@ -11,6 +12,13 @@
 #include <QDirIterator>
 #include <QFileInfo>
 #include <QGroupBox>
+#include <QDialog>
+#include <QComboBox>
+#include <QDialogButtonBox>
+#include <QHeaderView>
+#include <QScrollArea>
+#include <QTableWidget>
+#include <QTabWidget>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
@@ -18,6 +26,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QPushButton>
 #include <QStandardPaths>
 #include <QTimer>
@@ -46,7 +55,8 @@ class Window : public QMainWindow {
         }
         config = youngkly::loadConfig("config/youngkly.json");
         setWindowTitle("Youngkly");
-        resize(800, 700);
+        resize(1200, 800);
+        setMinimumSize(900, 620);
         auto *center = new QWidget;
         auto *layout = new QVBoxLayout(center);
         setCentralWidget(center);
@@ -95,9 +105,12 @@ class Window : public QMainWindow {
         inspect = new QPushButton("시트 날짜 확인");
         generate = new QPushButton("Word 보고서 작성");
         open = new QPushButton("결과 폴더 열기");
+        preview = new QPushButton("SI 형식 표 미리보기");
+        preview->setEnabled(false);
         buttons->addWidget(inspect);
         buttons->addWidget(generate);
         buttons->addWidget(open);
+        buttons->addWidget(preview);
         plans = new QPushButton("Future work 편집"); buttons->addWidget(plans);
         cancel = new QPushButton("작업 취소"); cancel->setEnabled(false); buttons->addWidget(cancel);
         connect(plans, &QPushButton::clicked, this, [this] {
@@ -136,6 +149,7 @@ class Window : public QMainWindow {
                         fail(QString::fromUtf8(e.what()));
                     }
                 });
+        connect(preview, &QPushButton::clicked, this, [this] { previewReport(); });
         connect(inspect, &QPushButton::clicked, this, [this] { begin(false); });
         connect(generate, &QPushButton::clicked, this, [this] { begin(true); });
         connect(open, &QPushButton::clicked, this, [this] {
@@ -143,9 +157,170 @@ class Window : public QMainWindow {
             QDesktopServices::openUrl(QUrl::fromLocalFile(QDir(root).filePath("outputs")));
         });
     }
+    bool configureDirections(const QJsonObject &model) {
+        QDialog dialog(this);
+        dialog.setWindowTitle("반응 방향과 에너지 기준 구조 확인");
+        dialog.resize(900, 580);
+        auto *layout = new QVBoxLayout(&dialog);
+        auto *explanation = new QLabel("IRC forward/reverse는 반응물·생성물을 자동 확정하지 않습니다. 각 경로의 기준 방향을 지정하세요. 미확정 경로는 활성화 장벽 해석을 보류합니다.", &dialog);
+        explanation->setWordWrap(true);
+        layout->addWidget(explanation);
+        auto *scroll = new QScrollArea(&dialog);
+        scroll->setWidgetResizable(true);
+        auto *page = new QWidget(scroll);
+        auto *column = new QVBoxLayout(page);
+        struct DirectionSelection { QComboBox *combo; QString key; int first; int last; };
+        QVector<DirectionSelection> selections;
+        const auto rules = session["reaction_rules"].toObject();
+        for (const auto &sectionValue : youngkly::reportSections(model, session)) {
+            const auto section = sectionValue.toObject();
+            QMap<int, QString> names;
+            for (const auto &rowValue : section["rows"].toArray()) {
+                const auto row = rowValue.toObject();
+                names[row["sheet_row"].toInt()] = row["filename"].toString();
+            }
+            for (const auto &groupValue : section["triplets"].toArray()) {
+                const auto group = groupValue.toObject();
+                const auto ids = group["rows"].toArray();
+                if (ids.size() != 3) continue;
+                const int first = ids.at(0).toInt(), last = ids.at(2).toInt();
+                const QString key = group["rule_key"].toString(group["section"].toString());
+                auto *label = new QLabel(youngkly::displayHeading(section["project_heading"].toString()) +
+                    " / " + group["section"].toString() + "\n" + names[first] + "  |  TS  |  " + names[last], page);
+                label->setWordWrap(true);
+                column->addWidget(label);
+                auto *combo = new QComboBox(page);
+                combo->addItem("방향 미확정 — 반응 장벽 문장 보류", 0);
+                combo->addItem("첫 번째 구조 → 세 번째 구조", 1);
+                combo->addItem("세 번째 구조 → 첫 번째 구조", 2);
+                const auto existing = rules.contains(key) ? rules[key].toObject() :
+                                      rules[group["section"].toString()].toObject();
+                const int reactant = existing["reactant_row_id"].toInt();
+                const int product = existing["product_row_id"].toInt();
+                combo->setCurrentIndex(reactant == first && product == last ? 1 :
+                                       reactant == last && product == first ? 2 : 0);
+                column->addWidget(combo);
+                selections << DirectionSelection{combo, key, first, last};
+            }
+        }
+        if (selections.isEmpty()) return false;
+        column->addStretch();
+        scroll->setWidget(page);
+        layout->addWidget(scroll);
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+        buttons->button(QDialogButtonBox::Save)->setText("반응 기준점 저장");
+        layout->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        if (dialog.exec() != QDialog::Accepted) return false;
+        auto updated = rules;
+        for (const auto &item : selections) {
+            auto rule = updated[item.key].toObject();
+            const int choice = item.combo->currentIndex();
+            if (choice == 0) {
+                rule.remove("reactant_row_id");
+                rule.remove("product_row_id");
+                rule.remove("reaction_direction_confirmed");
+            } else {
+                rule["reactant_row_id"] = choice == 1 ? item.first : item.last;
+                rule["product_row_id"] = choice == 1 ? item.last : item.first;
+                rule["reaction_direction_confirmed"] = true;
+            }
+            updated[item.key] = rule;
+        }
+        session["reaction_rules"] = updated;
+        return true;
+    }
+    void previewReport() {
+        if (modelPath.isEmpty() || !QFileInfo::exists(modelPath)) return;
+        try {
+            const auto model = youngkly::loadConfig(modelPath);
+            QDialog dialog(this);
+            dialog.setWindowTitle("Youngkly — SI Generator 형식 보고서 미리보기");
+            dialog.resize(1140, 760);
+            auto *layout = new QVBoxLayout(&dialog);
+            auto *tabs = new QTabWidget(&dialog);
+            const auto sections = youngkly::reportSections(model, session);
+            for (const auto &sectionValue : sections) {
+                const auto section = sectionValue.toObject();
+                if (section["analyses"].toArray().isEmpty()) continue;
+                auto *area = new QScrollArea(tabs);
+                area->setWidgetResizable(true);
+                auto *contents = new QWidget(area);
+                auto *column = new QVBoxLayout(contents);
+                auto *title = new QLabel(youngkly::displayHeading(section["project_heading"].toString()), contents);
+                QFont heading = title->font(); heading.setBold(true); heading.setPointSize(12); title->setFont(heading);
+                column->addWidget(title);
+                for (const auto &groupValue : section["analyses"].toArray()) {
+                    const auto group = groupValue.toObject();
+                    column->addWidget(new QLabel("반응 단계: " + group["section"].toString(), contents));
+                    QStringList issues;
+                    for (const auto &issue : group["issues"].toArray()) issues << issue.toString();
+                    if (!issues.isEmpty()) {
+                        auto *warning = new QLabel("검증 필요: " + issues.join(" | "), contents);
+                        warning->setWordWrap(true);
+                        column->addWidget(warning);
+                    }
+                    const auto rmsd = group["group_view"].toObject()["alignment_anchor_rmsd_angstrom"].toArray();
+                    if (!rmsd.isEmpty()) {
+                        QStringList values;
+                        for (const auto &value : rmsd) values << QString::number(value.toDouble(), 'f', 3);
+                        column->addWidget(new QLabel("Anchor alignment RMSD (Å): " + values.join(" / "), contents));
+                    }
+                    for (const auto &entry : {qMakePair("Relative energy", "energy_table"),
+                                              qMakePair("Mulliken spin density", "spin_table"),
+                                              qMakePair("Selected geometry", "geometry_table")}) {
+                        auto t = group[entry.second].toObject();
+                        if (entry.second != QStringLiteral("energy_table"))
+                            t = youngkly::siDocumentOrientation(t);
+                        const auto headers = t["headers"].toArray(), rows = t["rows"].toArray();
+                        if (headers.isEmpty()) continue;
+                        auto *label = new QLabel(entry.first, contents);
+                        QFont font = label->font(); font.setBold(true); label->setFont(font);
+                        column->addWidget(label);
+                        auto *table = new QTableWidget(rows.size(), headers.size(), contents);
+                        QStringList headerLabels;
+                        for (const auto &h : headers) headerLabels << h.toString();
+                        table->setHorizontalHeaderLabels(headerLabels);
+                        table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+                        table->setSelectionBehavior(QAbstractItemView::SelectRows);
+                        for (int i = 0; i < rows.size(); ++i) {
+                            const auto values = rows[i].toArray();
+                            for (int j = 0; j < headers.size(); ++j) {
+                                const auto value = j < values.size() ? values[j] : QJsonValue();
+                                const QString shown = value.isDouble() ?
+                                    QString::number(value.toDouble(), 'f', entry.second == QStringLiteral("energy_table") ? 2 : 3) :
+                                    value.isNull() || value.isUndefined() ? "N/A" : value.toString();
+                                auto *cell = new QTableWidgetItem(shown);
+                                cell->setTextAlignment(Qt::AlignCenter);
+                                table->setItem(i, j, cell);
+                            }
+                        }
+                        table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+                        table->setMinimumHeight(qMin(420, 70 + 32 * (rows.size() + 1)));
+                        column->addWidget(table);
+                    }
+                }
+                column->addStretch();
+                area->setWidget(contents);
+                tabs->addTab(area, section["sheet"].toString());
+            }
+            if (tabs->count() == 0) {
+                auto *empty = new QLabel("해당 날짜의 분석된 구조가 없습니다.", tabs);
+                tabs->addTab(empty, "미리보기");
+            }
+            layout->addWidget(tabs);
+            auto *close = new QPushButton("닫기", &dialog);
+            connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
+            layout->addWidget(close);
+            dialog.exec();
+        } catch (const std::exception &e) {
+            fail(QString::fromUtf8(e.what()));
+        }
+    }
     void begin(bool report) {
         try {
-            session = config; cancelled = false;
+            session = config; cancelled = false; directionsPrompted = false;
             runDirectory = "outputs/run-" + QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz");
             QDir().mkpath(runDirectory); modelPath = runDirectory + "/report-model.json";
             QJsonArray chosen;
@@ -204,6 +379,17 @@ class Window : public QMainWindow {
                 fail("선택한 날짜에 표시된 행이 없습니다. 시트 날짜 확인 후 보고 날짜를 선택하세요.");
                 return;
             }
+            if (!directionsPrompted) {
+                directionsPrompted = true;
+                if (configureDirections(model)) {
+                    youngkly::writeFile(".youngkly/gui-config.json", QJsonDocument(session).toJson());
+                    status->setText("확인한 반응 방향으로 에너지 및 문장을 다시 분석합니다.");
+                    start("Youngkly-cli.exe", {"--config", ".youngkly/gui-config.json",
+                          "--date", date->selectedDate().toString(Qt::ISODate),
+                          "--analyze", "--out", modelPath});
+                    return;
+                }
+            }
             stage = 1;
             status->setText("분자 뷰 선택 창에서 방향과 수소 표시를 정한 뒤 저장해 주세요.");
             start("youngkly_render.exe",
@@ -214,8 +400,10 @@ class Window : public QMainWindow {
             stage = 2;
             const auto d = date->selectedDate();
             const int week = (d.day() + QDate(d.year(), d.month(), 1).dayOfWeek() - 2) / 7 + 1;
-            output = runDirectory + QString("/주간_연구_보고서_이영섭_%1월_%2주차_%3.docx")
-                         .arg(d.month())
+            QString author = session["report_author"].toString("이영섭");
+            author.remove(QRegularExpression("[\\\\/:*?\\\"<>|]"));
+            output = runDirectory + QString("/주간_연구_보고서_%1_%2월_%3주차_%4.docx")
+                         .arg(author).arg(d.month())
                          .arg(week)
                          .arg(d.toString("yyMMdd"));
             status->setText("Word 보고서를 작성하고 있습니다.");
@@ -236,6 +424,7 @@ class Window : public QMainWindow {
         selectAll->setEnabled(!value);
         clearAll->setEnabled(!value);
         plans->setEnabled(!value); cancel->setEnabled(value);
+        preview->setEnabled(!value && !modelPath.isEmpty() && QFileInfo::exists(modelPath));
         for (auto *c : checks)
             c->setEnabled(!value);
     }
@@ -254,10 +443,10 @@ class Window : public QMainWindow {
     QVector<QCheckBox *> checks;
     QCalendarWidget *date;
     QPlainTextEdit *log;
-    QPushButton *inspect, *generate, *open, *plans, *cancel, *selectAll, *clearAll;
+    QPushButton *inspect, *generate, *open, *preview, *plans, *cancel, *selectAll, *clearAll;
     QLabel *status;
     QProcess process;
-    bool building = false, cancelled = false;
+    bool building = false, cancelled = false, directionsPrompted = false;
     int stage = 0;
 };
 int main(int argc, char **argv) {

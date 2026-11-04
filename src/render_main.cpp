@@ -62,9 +62,15 @@ int main(int argc, char **argv) {
                 QMap<int, QJsonObject> rows; for (auto v : section["rows"].toArray()) rows[v.toObject()["sheet_row"].toInt()] = v.toObject();
                 QDir out(QDir(args[3]).filePath(section["section_id"].toString("legacy"))); out.mkpath(".");
                 for (int gi = 0; gi < groups.size(); ++gi) {
-                    auto group = groups[gi].toObject(); if (group["status"] == "missing_outputs") continue;
+                    const auto sourceGroup = groups[gi].toObject();
+                    if (sourceGroup["status"] == "missing_outputs") continue;
+                    try {
+                    auto group = sourceGroup;
                     group.remove("captures"); // Never retain captures from a different input/view.
-                    const auto rule = config["reaction_rules"].toObject()[group["section"].toString()].toObject();
+                    const auto allRules = config["reaction_rules"].toObject();
+                    const auto key = group["rule_key"].toString();
+                    const auto rule = !key.isEmpty() && allRules.contains(key) ? allRules[key].toObject() :
+                                      allRules[group["section"].toString()].toObject();
                     const auto ids = group["rows"].toArray();
                     const bool spinOptimization = group["kind"] == "spin_optimization";
                     if (ids.isEmpty() || (!spinOptimization && ids.size() != 3)) throw std::runtime_error("Invalid structure group");
@@ -128,10 +134,14 @@ int main(int argc, char **argv) {
                         if (id.toInt() < 1 || id.toInt() > count) throw std::runtime_error("Anchor out of range");
                         target << molecules[reference].atoms[id.toInt() - 1].position;
                     }
-                    QJsonArray transforms;
+                    QJsonArray transforms, alignmentRmsd;
                     for (int i = 0; i < structureCount; ++i) {
                         QVector<QVector3D> source; for (auto id : anchors) source << molecules[i].atoms[id.toInt() - 1].position;
                         auto transform = youngkly::rigidAlignment(source, target);
+                        double residual = 0.0;
+                        for (int a = 0; a < source.size(); ++a)
+                            residual += double((transform.map(source[a]) - target[a]).lengthSquared());
+                        alignmentRmsd << std::sqrt(residual / qMax(1, source.size()));
                         for (auto &a : molecules[i].atoms) a.position = transform.map(a.position);
                         for (auto &d : modes[i].displacement) d = transform.mapVector(d);
                         molecules[i].rebuildBonds(); QJsonArray matrix;
@@ -217,11 +227,21 @@ int main(int argc, char **argv) {
                         captures << capture;
                     }
                     QJsonObject state{{"input_hash", fingerprint}, {"camera", camera}, {"options", options}, {"anchors", anchors},
-                        {"mapping_confirmed", true}, {"atom_mapping", youngkly::mappingJson(mapping)}, {"transforms", transforms}};
+                        {"mapping_confirmed", true}, {"atom_mapping", youngkly::mappingJson(mapping)},
+                        {"transforms", transforms}, {"alignment_anchor_rmsd_angstrom", alignmentRmsd}};
                     youngkly::writeFile(savedPath, QJsonDocument(state).toJson());
                     group["captures"] = captures; group["group_view"] = state; group["atom_mapping_confirmed"] = true; group["atom_mapping_valid"] = true;
                     group["render_status"] = "rendered"; youngkly::rebuildNarratives(group, config); groups[gi] = group;
                     QTextStream(stdout) << "Rendered group: " << gi + 1 << "/" << groups.size() << Qt::endl;
+                    } catch (const std::exception &error) {
+                        auto failed = sourceGroup;
+                        failed.remove("captures");
+                        failed["render_status"] = "render_error";
+                        failed["render_error"] = QString::fromUtf8(error.what());
+                        groups[gi] = failed;
+                        pending = true;
+                        QTextStream(stderr) << "Render group " << gi + 1 << ": " << error.what() << Qt::endl;
+                    }
                 }
                 section["analyses"] = groups; sections[si] = section;
             }

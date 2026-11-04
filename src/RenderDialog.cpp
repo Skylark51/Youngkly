@@ -70,8 +70,8 @@ RenderDialog::RenderDialog(QWidget *parent) : QDialog(parent) {
         } else view_->bestView();
     });
     connect(mapping_, &QCheckBox::toggled, save, &QPushButton::setEnabled);
-    sync_.setInterval(40);
-    connect(&sync_, &QTimer::timeout, this, [this] {
+    // Synchronize only when the reference camera changes, without polling.
+    connect(view_, &MoleculeView::cameraChanged, this, [this] {
         if (group_.isEmpty()) return;
         const int reference = group_.size() > 1 ? 1 : 0;
         for (int j = 0; j < group_.size() - 1; ++j) {
@@ -185,7 +185,10 @@ void RenderDialog::configureGroup(const QVector<Molecule> &molecules, const QStr
         if (j >= molecules.size() - 1) { companions_[j]->hide(); continue; }
         companions_[j]->setMolecule(molecules[j < reference ? j : j + 1]); companions_[j]->show();
     }
-    sync_.start();
+    for (auto *other : companions_) if (other->isVisible()) {
+        other->setStyle(view_->style());
+        other->applyCameraState(view_->reportCameraState());
+    }
 }
 void RenderDialog::restoreOptions(bool hideCH, bool activation, bool shadows, int brightness, int strength) {
     activation_->setChecked(activation); hide_->setChecked(hideCH);

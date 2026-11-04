@@ -98,6 +98,20 @@ QJsonObject buildWorkspace(const QJsonObject &config, const QDate &date, bool fe
                                                                               QCryptographicHash::Sha256)
                                                          .toHex()
                                                          .left(12));
+            // A report can contain identically named stages in several projects.
+            // Keep per-group rules keyed by both source tab and original row identity.
+            for (const char *field : {"triplets", "spin_groups"}) {
+                QJsonArray keyed;
+                for (const auto &value : plan[field].toArray()) {
+                    auto group = value.toObject();
+                    const auto identifiers = group["rows"].toArray();
+                    if (!identifiers.isEmpty())
+                        group["rule_key"] = plan["section_id"].toString() + "::" +
+                            QString::number(identifiers.at(0).toInt());
+                    keyed << group;
+                }
+                plan[field] = keyed;
+            }
             plan["source"] = QJsonObject{{"spreadsheet_id", book},
                                          {"tab", tab},
                                          {"xlsx_sha256", hash},

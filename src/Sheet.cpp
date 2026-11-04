@@ -246,14 +246,20 @@ QJsonObject makePlan(const Sheet &sheet, const QDate &selected) {
             continue;
         auto stem = b["filename"].toString();
         const auto prefix = stem.left(stem.size() - 4);
-        auto suffix = [](const QJsonObject &r) {
-            return r["role"] == "irc_reverse" ? "-ircrev-opt-freq.out" : "-ircfwd-opt-freq.out";
+        if (a["section"] != b["section"] || c["section"] != b["section"])
+            continue;
+        const auto extension = stem.right(4);
+        auto suffix = [&extension](const QJsonObject &r) {
+            return (r["role"] == "irc_reverse" ? "-ircrev-opt-freq" : "-ircfwd-opt-freq") + extension;
         };
         if (a["filename"] != prefix + suffix(a) || c["filename"] != prefix + suffix(c))
             continue;
         groups << QJsonObject{{"section", a["section"]},
                               {"rows", QJsonArray{a["sheet_row"], b["sheet_row"], c["sheet_row"]}},
                               {"c_h_activation", QJsonValue::Null},
+                              {"reactant_row_id", QJsonValue::Null},
+                              {"product_row_id", QJsonValue::Null},
+                              {"reaction_direction_confirmed", false},
                               {"requires_review", QJsonArray{"reaction type / C-H activation",
                                                              "atom correspondence", "wording template"}}};
     }

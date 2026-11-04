@@ -77,7 +77,10 @@ void rebuildNarratives(QJsonObject &group, const QJsonObject &config) {
     QJsonArray paragraphs;
     for (auto v : group["paragraphs"].toArray())
         if (v.toObject()["template_key"] == "energy") paragraphs << v;
-    const auto rule = config["reaction_rules"].toObject()[group["section"].toString()].toObject();
+    const auto allRules = config["reaction_rules"].toObject();
+    const auto key = group["rule_key"].toString();
+    const auto rule = !key.isEmpty() && allRules.contains(key) ? allRules[key].toObject() :
+                      allRules[group["section"].toString()].toObject();
     const bool verified = group["atom_mapping_valid"].toBool(true) && (group["atom_mapping_confirmed"].toBool() || rule["atom_mapping_confirmed"].toBool());
     group["narrative_review"] = verified ? "atom_mapping_confirmed" : "atom_mapping_confirmation_required";
     const auto phrases = loadConfig(config["phrases_file"].toString());

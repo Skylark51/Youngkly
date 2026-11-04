@@ -1,0 +1,12 @@
+{
+  "SI Generator": {
+    "repository": "Skylark51/SIGenerator",
+    "commit": "0a184a283622e7e47eb522b94f9c33bfbbb72917",
+    "source_directory": "native"
+  },
+  "Youngcraft": {
+    "repository": "Skylark51/YoungCraft",
+    "commit": "a1f1f6e84c79becfe0b54c0a3e8c72152a5b62a0",
+    "source_directory": "src"
+  }
+}
