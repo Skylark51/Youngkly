@@ -77,6 +77,12 @@ class Window : public QMainWindow {
         date->setVerticalHeaderFormat(QCalendarWidget::NoVerticalHeader);
         date->setFirstDayOfWeek(Qt::Monday);
         dateLayout->addWidget(date);
+        newProject = new QPushButton("새 보고서 프로젝트 만들기");
+        newProject->setObjectName("createReportProject");
+        dateLayout->addWidget(newProject);
+        connect(newProject, &QPushButton::clicked, this, [this] { createReportProject(); });
+        auto *steps = new QLabel("① 보고 날짜 선택 → 새 프로젝트 만들기\n② 연구 선택 → 시트·서버에서 자료 가져오기\n③ 프리뷰 확인 → Word 작성");
+        steps->setWordWrap(true); dateLayout->addWidget(steps);
         dateLayout->addWidget(new QLabel("저장된 보고서 프로젝트"));
         projectList = new QListWidget;
         projectList->setObjectName("savedReportProjects");
@@ -141,7 +147,7 @@ class Window : public QMainWindow {
         connect(cancel, &QPushButton::clicked, this, [this] { cancelled = true; process.kill(); status->setText("작업을 취소했습니다."); });
         layout->addLayout(buttons);
         auto *storage = new QHBoxLayout;
-        createPreview = new QPushButton("프리뷰 생성·저장");
+        createPreview = new QPushButton("시트·서버에서 자료 가져오기");
         loadSaved = new QPushButton("저장 프로젝트 불러오기");
         exportSaved = new QPushButton("현재 프리뷰로 Word 작성"); exportSaved->setEnabled(false);
         storage->addWidget(createPreview); storage->addWidget(loadSaved); storage->addWidget(exportSaved);
@@ -157,7 +163,7 @@ class Window : public QMainWindow {
                 stage = 1; previewOnly = false; cancelled = false; busy(true); advance();
             } catch (const std::exception &e) { fail(QString::fromUtf8(e.what())); }
         });
-        status = new QLabel("보고 날짜와 연구 항목을 선택하세요.");
+        status = new QLabel("달력에서 보고 날짜를 고른 뒤 ‘새 보고서 프로젝트 만들기’를 누르세요.");
         status->setWordWrap(true);
         layout->addWidget(status);
         log = new QPlainTextEdit;
@@ -196,6 +202,35 @@ class Window : public QMainWindow {
         });
         refreshProjects();
     }
+    bool createReportProject() {
+        try {
+            const auto selectedDate = date->selectedDate().toString(Qt::ISODate);
+            // Reopen an existing report for this date instead of replacing it with an empty model.
+            for (int i = 0; i < projectList->count(); ++i) {
+                const auto *item = projectList->item(i);
+                if (item->data(Qt::UserRole + 1).toString() == selectedDate) {
+                    loadProjectPath(item->data(Qt::UserRole).toString(), false);
+                    return true;
+                }
+            }
+            auto initialConfig = config;
+            QJsonArray sources;
+            const auto available = config["sources"].toArray();
+            for (int i = 0; i < checks.size(); ++i) if (checks[i]->isChecked()) sources << available[i];
+            if (sources.isEmpty()) { status->setText("포함할 연구를 하나 이상 선택하세요."); return false; }
+            initialConfig["sources"] = sources;
+            initialConfig["include_dispersion"] = dispersion->isChecked();
+            initialConfig["include_complexation"] = complexation->isChecked();
+            const QJsonObject initial{{"schema_version", 3}, {"report_date", selectedDate},
+                {"sections", QJsonArray()}, {"project_status", "created"}};
+            const auto paths = youngkly::saveProjectSnapshots(initial, initialConfig, "프로젝트 모음");
+            if (paths.isEmpty()) throw std::runtime_error("Cannot create report project");
+            loadProjectPath(paths.first(), false);
+            refreshProjects();
+            status->setText("프로젝트를 만들었습니다. 연구를 선택하고 ‘시트·서버에서 자료 가져오기’를 누르세요.");
+            return true;
+        } catch (const std::exception &e) { fail(QString::fromUtf8(e.what())); return false; }
+    }
     void refreshProjects() {
         const auto selected = projectList->currentItem() ? projectList->currentItem()->data(Qt::UserRole).toString() : QString();
         projectList->clear();
@@ -217,7 +252,7 @@ class Window : public QMainWindow {
             } catch (const std::exception &) { /* Ignore incomplete saves in the startup list. */ }
         }
         if (!projectList->count()) {
-            auto *empty = new QListWidgetItem("저장된 보고서가 없습니다.", projectList);
+            auto *empty = new QListWidgetItem("아직 프로젝트가 없습니다. 위의 새 프로젝트 만들기를 누르세요.", projectList);
             empty->setFlags(Qt::NoItemFlags);
         }
     }
@@ -442,6 +477,9 @@ class Window : public QMainWindow {
     }
     void begin(bool report) {
         try {
+            if (report && (modelPath.isEmpty() || !QFileInfo::exists(modelPath) ||
+                youngkly::loadConfig(modelPath)["report_date"].toString() != date->selectedDate().toString(Qt::ISODate)))
+                if (!createReportProject()) return;
             const auto previousRules = session["reaction_rules"];
             session = config;
             if (!modelPath.isEmpty() && QFileInfo::exists(modelPath) &&
@@ -554,12 +592,16 @@ class Window : public QMainWindow {
 
   private:
     void busy(bool value) {
+        newProject->setEnabled(!value);
         projectList->setEnabled(!value);
         openWord->setEnabled(!value && QFileInfo::exists(output));
         createPreview->setEnabled(!value); loadSaved->setEnabled(!value);
         bool rendered = false;
         if (!value && !modelPath.isEmpty() && QFileInfo::exists(modelPath)) {
-            rendered = true;
+            bool hasContent = false;
+            for (const auto &section : youngkly::reportSections(youngkly::loadConfig(modelPath), session))
+                hasContent |= !section.toObject()["analyses"].toArray().isEmpty() || !section.toObject()["future_work"].toArray().isEmpty();
+            rendered = hasContent;
             for (const auto &section : youngkly::reportSections(youngkly::loadConfig(modelPath), session))
                 for (const auto &g : section.toObject()["analyses"].toArray()) {
                     const auto group = g.toObject();
@@ -574,7 +616,7 @@ class Window : public QMainWindow {
         selectAll->setEnabled(!value);
         clearAll->setEnabled(!value);
         plans->setEnabled(!value); cancel->setEnabled(value);
-        preview->setEnabled(!value && !modelPath.isEmpty() && QFileInfo::exists(modelPath));
+        preview->setEnabled(!value && rendered);
         for (auto *c : checks)
             c->setEnabled(!value);
     }
@@ -591,7 +633,7 @@ class Window : public QMainWindow {
     QString root, output, modelPath, runDirectory, sessionConfigPath;
     bool previewOnly = false;
     QCheckBox *dispersion, *complexation;
-    QPushButton *openWord;
+    QPushButton *openWord, *newProject;
     QPushButton *createPreview, *loadSaved, *exportSaved;
     QJsonObject config, session;
     QVector<QCheckBox *> checks;
@@ -616,6 +658,7 @@ int main(int argc, char **argv) {
         Window window(root);
         window.show();
         if (args.contains("--smoke-test")) {
+            if (args.contains("--smoke-create-project") && !window.createReportProject()) return 1;
             QJsonObject result{
                 {"status", "ok"},
                 {"qt", qVersion()},
