@@ -7,6 +7,10 @@ try {
   $target=[IO.Path]::GetFullPath((Join-Path $root $OutputPath))
   if(Test-Path -LiteralPath $target){throw 'Package target exists; choose a new OutputPath'}
   $qtRoot=Join-Path $ToolRoot 'msys64/ucrt64'
+  if (-not (Test-Path -LiteralPath (Join-Path $qtRoot 'bin/windeployqt.exe'))) {
+    $deployer = Get-Command windeployqt.exe -ErrorAction Stop
+    $qtRoot = Split-Path -Parent (Split-Path -Parent $deployer.Source)
+  }
   $env:PATH="$qtRoot/bin;$env:PATH"
   # The Qt deployment tools use narrow Windows paths; stage under an ASCII temp path.
   $stage=Join-Path ([IO.Path]::GetTempPath()) ('Youngkly-package-'+[guid]::NewGuid().ToString('N'))
