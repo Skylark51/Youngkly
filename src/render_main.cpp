@@ -62,7 +62,10 @@ int main(int argc, char **argv) {
                 QMap<int, QJsonObject> rows; for (auto v : section["rows"].toArray()) rows[v.toObject()["sheet_row"].toInt()] = v.toObject();
                 QDir out(QDir(args[3]).filePath(section["section_id"].toString("legacy"))); out.mkpath(".");
                 for (int gi = 0; gi < groups.size(); ++gi) {
-                    auto group = groups[gi].toObject(); if (group["status"] == "missing_outputs") continue;
+                    const auto sourceGroup = groups[gi].toObject();
+                    if (sourceGroup["status"] == "missing_outputs") continue;
+                    try {
+                    auto group = sourceGroup;
                     group.remove("captures"); // Never retain captures from a different input/view.
                     const auto rule = config["reaction_rules"].toObject()[group["section"].toString()].toObject();
                     const auto ids = group["rows"].toArray();
@@ -222,6 +225,15 @@ int main(int argc, char **argv) {
                     group["captures"] = captures; group["group_view"] = state; group["atom_mapping_confirmed"] = true; group["atom_mapping_valid"] = true;
                     group["render_status"] = "rendered"; youngkly::rebuildNarratives(group, config); groups[gi] = group;
                     QTextStream(stdout) << "Rendered group: " << gi + 1 << "/" << groups.size() << Qt::endl;
+                    } catch (const std::exception &error) {
+                        auto failed = sourceGroup;
+                        failed.remove("captures");
+                        failed["render_status"] = "render_error";
+                        failed["render_error"] = QString::fromUtf8(error.what());
+                        groups[gi] = failed;
+                        pending = true;
+                        QTextStream(stderr) << "Render group " << gi + 1 << ": " << error.what() << Qt::endl;
+                    }
                 }
                 section["analyses"] = groups; sections[si] = section;
             }
