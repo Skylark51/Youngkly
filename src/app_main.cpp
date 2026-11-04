@@ -13,6 +13,8 @@
 #include <QFileInfo>
 #include <QGroupBox>
 #include <QDialog>
+#include <QComboBox>
+#include <QDialogButtonBox>
 #include <QHeaderView>
 #include <QScrollArea>
 #include <QTableWidget>
@@ -154,6 +156,79 @@ class Window : public QMainWindow {
             QDesktopServices::openUrl(QUrl::fromLocalFile(QDir(root).filePath("outputs")));
         });
     }
+    bool configureDirections(const QJsonObject &model) {
+        QDialog dialog(this);
+        dialog.setWindowTitle("반응 방향과 에너지 기준 구조 확인");
+        dialog.resize(900, 580);
+        auto *layout = new QVBoxLayout(&dialog);
+        auto *explanation = new QLabel("IRC forward/reverse는 반응물·생성물을 자동 확정하지 않습니다. 각 경로의 기준 방향을 지정하세요. 미확정 경로는 활성화 장벽 해석을 보류합니다.", &dialog);
+        explanation->setWordWrap(true);
+        layout->addWidget(explanation);
+        auto *scroll = new QScrollArea(&dialog);
+        scroll->setWidgetResizable(true);
+        auto *page = new QWidget(scroll);
+        auto *column = new QVBoxLayout(page);
+        struct DirectionSelection { QComboBox *combo; QString key; int first; int last; };
+        QVector<DirectionSelection> selections;
+        const auto rules = session["reaction_rules"].toObject();
+        for (const auto &sectionValue : youngkly::reportSections(model, session)) {
+            const auto section = sectionValue.toObject();
+            QMap<int, QString> names;
+            for (const auto &rowValue : section["rows"].toArray()) {
+                const auto row = rowValue.toObject();
+                names[row["sheet_row"].toInt()] = row["filename"].toString();
+            }
+            for (const auto &groupValue : section["triplets"].toArray()) {
+                const auto group = groupValue.toObject();
+                const auto ids = group["rows"].toArray();
+                if (ids.size() != 3) continue;
+                const int first = ids.at(0).toInt(), last = ids.at(2).toInt();
+                const QString key = group["section"].toString();
+                auto *label = new QLabel(youngkly::displayHeading(section["project_heading"].toString()) +
+                    " / " + key + "\n" + names[first] + "  |  TS  |  " + names[last], page);
+                label->setWordWrap(true);
+                column->addWidget(label);
+                auto *combo = new QComboBox(page);
+                combo->addItem("방향 미확정 — 반응 장벽 문장 보류", 0);
+                combo->addItem("첫 번째 구조 → 세 번째 구조", 1);
+                combo->addItem("세 번째 구조 → 첫 번째 구조", 2);
+                const auto existing = rules[key].toObject();
+                const int reactant = existing["reactant_row_id"].toInt();
+                const int product = existing["product_row_id"].toInt();
+                combo->setCurrentIndex(reactant == first && product == last ? 1 :
+                                       reactant == last && product == first ? 2 : 0);
+                column->addWidget(combo);
+                selections << DirectionSelection{combo, key, first, last};
+            }
+        }
+        if (selections.isEmpty()) return false;
+        column->addStretch();
+        scroll->setWidget(page);
+        layout->addWidget(scroll);
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+        buttons->button(QDialogButtonBox::Save)->setText("반응 기준점 저장");
+        layout->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        if (dialog.exec() != QDialog::Accepted) return false;
+        auto updated = rules;
+        for (const auto &item : selections) {
+            auto rule = updated[item.key].toObject();
+            const int choice = item.combo->currentIndex();
+            if (choice == 0) {
+                rule.remove("reactant_row_id");
+                rule.remove("product_row_id");
+                rule.remove("reaction_direction_confirmed");
+            } else {
+                rule["reactant_row_id"] = choice == 1 ? item.first : item.last;
+                rule["product_row_id"] = choice == 1 ? item.last : item.first;
+                rule["reaction_direction_confirmed"] = true;
+            }
+            updated[item.key] = rule;
+        }
+        session["reaction_rules"] = updated;
+        return true;
+    }
     void previewReport() {
         if (modelPath.isEmpty() || !QFileInfo::exists(modelPath)) return;
         try {
@@ -230,7 +305,7 @@ class Window : public QMainWindow {
     }
     void begin(bool report) {
         try {
-            session = config; cancelled = false;
+            session = config; cancelled = false; directionsPrompted = false;
             runDirectory = "outputs/run-" + QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz");
             QDir().mkpath(runDirectory); modelPath = runDirectory + "/report-model.json";
             QJsonArray chosen;
@@ -289,6 +364,17 @@ class Window : public QMainWindow {
                 fail("선택한 날짜에 표시된 행이 없습니다. 시트 날짜 확인 후 보고 날짜를 선택하세요.");
                 return;
             }
+            if (!directionsPrompted) {
+                directionsPrompted = true;
+                if (configureDirections(model)) {
+                    youngkly::writeFile(".youngkly/gui-config.json", QJsonDocument(session).toJson());
+                    status->setText("확인한 반응 방향으로 에너지 및 문장을 다시 분석합니다.");
+                    start("Youngkly-cli.exe", {"--config", ".youngkly/gui-config.json",
+                          "--date", date->selectedDate().toString(Qt::ISODate),
+                          "--analyze", "--out", modelPath});
+                    return;
+                }
+            }
             stage = 1;
             status->setText("분자 뷰 선택 창에서 방향과 수소 표시를 정한 뒤 저장해 주세요.");
             start("youngkly_render.exe",
@@ -343,7 +429,7 @@ class Window : public QMainWindow {
     QPushButton *inspect, *generate, *open, *preview, *plans, *cancel, *selectAll, *clearAll;
     QLabel *status;
     QProcess process;
-    bool building = false, cancelled = false;
+    bool building = false, cancelled = false, directionsPrompted = false;
     int stage = 0;
 };
 int main(int argc, char **argv) {
