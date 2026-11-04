@@ -9,7 +9,7 @@ QJsonObject siDocumentOrientation(const QJsonObject &source) {
     if (headers.isEmpty()) return source;
     QJsonArray outputHeaders{headers[0]}, outputRows;
     for (const auto &value : rows)
-        outputHeaders << value.toArray().value(0);
+        outputHeaders << (value.toArray().isEmpty() ? QJsonValue(QJsonValue::Null) : value.toArray().at(0));
     for (int column = 1; column < headers.size(); ++column) {
         QJsonArray row{headers[column]};
         for (const auto &value : rows) {
