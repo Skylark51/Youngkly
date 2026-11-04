@@ -119,7 +119,7 @@ void rebuildNarratives(QJsonObject &group, const QJsonObject &config) {
             }
             if (p.isEmpty()) continue;
             // Always describe metal sites; other sites need a review-level change.
-            const bool isMetal = QRegularExpression("^(Co|Mn|Fe|Ni|Cu|Cr|V|Ti|Mo|Ru|Ir|Rh|Pd|Pt|Zn)[0-9]").match(row[0].toString()).hasMatch();
+            const bool isMetal = QRegularExpression("^(Co|Mn|Fe|Ni|Cu|Cr|V|Ti|Mo|Ru|Ir|Rh|Pd|Pt|Zn)(?:[0-9]|$)").match(row[0].toString()).hasMatch();
             if (!p["highlight"].toBool() && !(kind == "spin" && isMetal)) continue;
             p["table_row"] = i; p["metal"] = isMetal;
             p["geometry_order"] = n;

@@ -5,6 +5,8 @@
 #include <QPushButton>
 #include <QDialogButtonBox>
 #include <cmath>
+#include <QSignalBlocker>
+#include <stdexcept>
 using namespace youngcraft;
 RenderDialog::RenderDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle("Youngkly — 분자 뷰 선택");
@@ -168,6 +170,10 @@ void RenderDialog::lighting() {
 void RenderDialog::configureGroup(const QVector<Molecule> &molecules, const QStringList &labels,
                                   const QString &description, bool activation,
                                   const FrequencyMode *mode, bool confirmed) {
+    if (molecules.isEmpty() || labels.size() != molecules.size())
+        throw std::runtime_error("Group molecules and labels must be nonempty and match");
+    // Camera changes during configure() must not access companion panes from the previous group.
+    const QSignalBlocker cameraSignals(view_);
     group_ = molecules;
     view_->setMinimumSize(280, 330);
     resize(1250, 790);

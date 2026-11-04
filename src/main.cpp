@@ -32,6 +32,7 @@ int main(int argc, char **argv) {
     p.addOption({"out", "Plan/model JSON", "file", "outputs/report-model.json"});
     p.addOption({"model", "Existing analyzed/rendered model for DOCX export", "file"});
     p.addOption({"docx", "Write DOCX from the reference report", "file"});
+    p.addOption({"save-projects", "Save immutable date/project revisions from --model", "directory"});
     p.addOption({"project", "Process one configured project ID", "id"});
     p.process(app);
     try {
@@ -48,6 +49,12 @@ int main(int argc, char **argv) {
             youngkly::writeReport(config["reference_docx"].toString(), p.value("docx"), model, config);
             QTextStream(stdout) << "DOCX ms: " << timer.elapsed() << "\n";
             QTextStream(stdout) << "DOCX: " << QFileInfo(p.value("docx")).absoluteFilePath() << "\n";
+            return 0;
+        }
+        if (p.isSet("save-projects")) {
+            if (!p.isSet("model")) throw std::runtime_error("--save-projects requires --model");
+            for (const auto &path : youngkly::saveProjectSnapshots(youngkly::loadConfig(p.value("model")), config, p.value("save-projects")))
+                QTextStream(stdout) << "Saved: " << path << Qt::endl;
             return 0;
         }
         auto date = QDate::fromString(p.value("date"), Qt::ISODate);

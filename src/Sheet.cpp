@@ -288,7 +288,7 @@ QJsonObject makePlan(const Sheet &sheet, const QDate &selected) {
              multiplicities = group["multiplicities"].toArray();
         const int multiplicity = match.captured(1).toInt();
         if (multiplicities.contains(multiplicity)) group["duplicate_multiplicity"] = true;
-        ids << row["sheet_row"]; labels << QString("Multiplicity %1").arg(multiplicity);
+        ids << row["sheet_row"]; labels << QString("S = %1").arg((multiplicity - 1) / 2.0, 0, 'g', 6);
         multiplicities << multiplicity;
         group["rows"] = ids; group["structure_labels"] = labels; group["multiplicities"] = multiplicities;
         spinGroups[index] = group;

@@ -16,7 +16,7 @@ Google Sheets의 I열과 J열 보고 날짜를 모두 확인하여 어느 한 �
 
 정지 PNG는 화면 캡처를 확대하지 않고 기본 긴 변 3000px에서 새로 렌더링한 뒤 여백을 자릅니다. 600 dpi 정보를 기록하며, 2배 슈퍼샘플링·MSAA와 출력 크기에 맞춘 곡면 분할을 적용합니다. `render_image_long_edge_px`로 정지 그림, `render_animation_long_edge_px`로 GIF의 렌더링 크기(기본 1280px)를 조절합니다. TS의 고해상도 정지 PNG도 GIF와 함께 저장합니다. 두 해상도의 잘라낼 범위는 애니메이션 전체 움직임을 기준으로 맞춥니다. 보고서에는 Word 자동 그림 압축 금지 설정을 넣습니다. 공용 고해상도 렌더링 API는 Youngcraft의 그림 저장·복사·프레임 저장에도 적용됩니다.
 
-Word의 한글은 맑은 고딕, 본문은 양쪽 정렬, 모든 표 값은 가운데 정렬입니다. 표와 본문 사이는 기본 8 pt, 표 블록 사이는 12 pt로 관리하며 Future work는 새 페이지에서 시작합니다. 표는 상하 0.75 pt, 헤더 아래 0.5 pt의 3선 표이고, 행 전체를 한 페이지에 강제로 묶지 않습니다. 스핀 표 아래에는 금속부터 검증된 수치 변화 문장을 붙입니다. 원자 대응이 확인되지 않은 경우 분석 문장은 보류합니다.
+Word의 한글은 맑은 고딕, 본문은 양쪽 정렬, 모든 표 값은 가운데 정렬입니다. 표와 본문 사이는 기본 8 pt, 표 블록 사이는 12 pt로 관리하며 Future work는 새 페이지에서 시작합니다. 표는 상하 0.75 pt, 헤더 아래 0.5 pt의 3선 표이고, 행 전체를 한 페이지에 강제로 묶지 않습니다. 스핀 표 아래에는 검증된 수치 변화 문장을 붙입니다. 원자 대응이 확인되지 않은 경우 분석 문장은 보류합니다.
 
 Qt DLL, 이미지·네트워크 플러그인, CLI와 Youngcraft renderer를 EXE 안에 함께 묶었습니다. 별도 Qt·Python·CMake 설치 없이 실행합니다. EXE만 다른 빈 폴더로 옮겨도 기본 설정과 보고서 예시를 초기화합니다. 기존 사용자 설정은 덮어쓰지 않습니다.
 
@@ -40,9 +40,9 @@ Qt DLL, 이미지·네트워크 플러그인, CLI와 Youngcraft renderer를 EXE 
    스핀 최적화 출력도 포함합니다. `1-구조명-opt-freq.out`, `3-구조명-opt-freq.out`, `5-구조명-opt-freq.out`처럼 앞의 다중도만 다른 출력은 같은 시트·구간 안에서 비교 그룹으로 묶습니다(`.log`도 지원). 선택한 날짜의 한 상태 또는 두 상태만 있어도 출력하며, 상태 순서는 시트를 따릅니다. 구조 그림과 에너지·스핀·geometry 표를 작성하고 TS GIF나 활성화 장벽 문장은 생성하지 않습니다. 중복 다중도나 중복 서버 경로는 보고서에 확인 사유를 남깁니다. BB 좌표는 원자 순서와 원소를 확인하고 proper rotation·이동 정렬 후 비교하므로 Gaussian의 좌표 방향 변경 때문에 정상 BB가 제외되지 않습니다.
 3. lion → dumbo → tachyon 순서로 정확한 파일명을 검색합니다. size/mtime과 로컬 SHA-256을 확인하여 변경 없는 출력은 재다운로드하지 않으며, 전송은 기본 최대 3개씩 병렬 처리합니다. 파싱 결과는 원본/BB 내용 해시와 SI parser 버전으로 재사용합니다. 이미 발견한 파일은 다음 서버에서 재검색하지 않습니다. `-freq-bb.out`도 독립적으로 탐색하므로 원본과 다른 서버에 있어도 연결할 수 있습니다. 중복 경로는 임의로 선택하지 않으며, 서버 접속 실패를 파일 부재로 취급하지 않습니다.
 4. SI Generator의 실제 C++ Gaussian parser와 energy/geometry 함수를 링크합니다. 최적화 좌표·열 보정은 frequency 출력에서, TZVPP electronic energy와 spin은 검증된 BB 출력에서 읽습니다. BB의 원자 순서와 좌표도 비교합니다.
-5. 오른쪽 에너지 값과 수식을 함께 보관합니다. Excel 공유 수식을 행별 참조식으로 복원하고, 시트의 에너지 성분을 SI 계산 결과 및 성분 합계와 대조합니다. 기준 상태가 다른 표를 임의로 원점 변경하지 않습니다. 표는 SI Generator의 `ΔE`, `ΔΔE`, `E Total`, `ΔZ0`, `ΔΔE Thermal`, `−TΔS`, Dispersion, Complexation, `ΔG` 열 순서, 아래/위첨자와 보정항 `+` 부호를 따릅니다. `E Total`과 `ΔG`는 굵게 표시합니다. Complexation 입력이 별도로 없으면 SI의 기본값 0을 사용합니다.
+5. 오른쪽 에너지 값과 수식을 함께 보관합니다. Excel 공유 수식을 행별 참조식으로 복원하고, 시트의 에너지 성분을 SI 계산 결과 및 성분 합계와 대조합니다. 기준 상태가 다른 표를 임의로 원점 변경하지 않습니다. 표는 SI Generator의 `ΔE`, `ΔΔE`, `E Total`, `ΔZ0`, `ΔΔE Thermal`, `−TΔS`, `ΔG` 열 순서, 아래/위첨자와 보정항 `+` 부호를 따릅니다. `E Total`과 `ΔG`는 굵게 표시합니다. Complexation 입력이 별도로 없으면 SI의 기본값 0을 사용합니다.
 6. Youngcraft의 실제 OpenGL renderer로 그림을 만듭니다. TS를 기준으로 대응 원자의 proper rotation/병진 정렬을 하고 직교 투영·확대율·pan을 공유합니다. TS 진동 벡터에도 같은 회전을 적용합니다. 모든 정지 구조와 32개 프레임의 합집합으로 자릅니다. 세 이미지는 각각 너비 5 cm입니다. TS의 유일한 imaginary mode로 32프레임 GIF를 생성하고, 매 프레임 결합을 다시 계산합니다.
-7. 상대 에너지, 금속이 첫 행인 Mulliken spin density, key geometry를 **편집 가능한 Word 표**로 넣습니다. 변화에 대한 검토 표시는 문장에 적용합니다.
+7. 상대 에너지, SI Generator 기준의 Mulliken spin density, key geometry를 **편집 가능한 Word 표**로 넣습니다. 변화에 대한 검토 표시는 문장에 적용합니다.
 8. 예시 문서의 제목 1·2·3과 본문 paragraph/run 속성을 이용하여 DOCX를 만듭니다. 목차는 Word에서 갱신되도록 설정합니다.
 
 프로그램 런타임은 C++/Qt입니다. Python은 개발 시 DOCX/GIF 검증에만 사용합니다.
@@ -83,7 +83,7 @@ $env:PATH = 'D:/yc-tools/msys64/ucrt64/bin;' + $env:PATH
 - `reaction_rules.<section>.c_h_activation`: `true`이면 C에 붙은 H를 유지합니다. `false` 또는 미등록이면 C–H 수소만 기본으로 숨깁니다. 뷰 선택 창에서 직접 변경할 수 있습니다. 반응 종류를 파일명으로 확정하지 않습니다.
 - `interactive_rendering`: 기본값 `true`. 자동 검증·배치 작업은 renderer 명령 끝에 `--batch`를 지정합니다.
 - 뷰 확정 후 캡처의 흰 여백을 자동으로 자릅니다. 분자·그림자 경계에 긴 변의 1.5%(최소 4px)만 남기며, TS는 정지 이미지와 전체 32프레임의 합집합 범위를 동일하게 적용하여 움직임이 잘리거나 화면이 흔들리지 않도록 합니다.
-- `include_dispersion`, `include_complexation`: SI Generator와 같이 상대 표의 해당 보정 열을 포함할지 선택합니다. 기본값은 모두 `true`입니다.
+- `include_dispersion`, `include_complexation`: SI Generator와 같이 상대 표의 해당 보정 열을 포함할지 선택합니다. 기본값은 모두 `false`이며 GUI의 체크박스로 필요한 경우에만 포함합니다.
 - `reaction_rules.<section>.geometry_atom_groups`: 선택적으로 `[[1,2],[2,1,3],[4,1,2,3]]`처럼 1-based atom ID를 지정합니다. 각각 SI의 거리·각·이면각 함수를 사용합니다. 미지정 시 크게 변하는 가까운 원자쌍을 후보로 제안합니다.
 - 기본 변화 기준: 거리 0.15 Å, 각도 5°, spin 0.2. 이 기준은 반응을 판정하는 물리 법칙이 아니라 검토 후보 선택 기준입니다.
 
@@ -144,3 +144,12 @@ gh auth login
 Git과 GitHub CLI(`gh`)가 필요합니다. 스크립트는 `main`을 fast-forward로 갱신한 다음 **현재 Git 커밋에 대응하는 성공한 Actions 실행**의 `Youngkly-Windows-portable` 아티팩트를 받아 기존 `Youngkly.exe`를 `backups/`에 백업하고 새 파일로 교체합니다. 사용 중인 Youngkly를 종료한 뒤 실행하세요. 첫 실행 시 내부 런타임은 별도 버전 폴더에 자동 생성됩니다.
 
 GitHub 웹에서 `Actions → Youngkly Windows build → 성공한 main 실행 → Artifacts → Youngkly-Windows-portable`로 직접 다운로드하여 압축을 풀고 `Youngkly.exe`를 교체해도 됩니다. 사용자가 수정한 설정, Future work 및 보고서 폴더는 유지하세요.
+
+
+## 날짜별 프로젝트 저장과 위클리 표기
+
+`프리뷰 생성·저장`은 선택한 날짜와 연구를 분석하고 뷰를 확정한 뒤 `outputs/projects/YYYY-MM-DD/프로젝트ID/저장버전/`에 모델·설정·그림·Future work를 보존합니다. 여러 탭은 같은 프로젝트 버전에 함께 저장됩니다. `저장 프로젝트 불러오기`에서 이전 버전을 선택하면 서버 접속 없이 표를 확인할 수 있고, `현재 프리뷰로 Word 작성`으로 저장된 값에서 보고서를 다시 작성합니다. 같은 날짜·연구의 새 프리뷰나 Word 보고서는 새 버전으로 저장되어 이전 정보를 덮어쓰지 않습니다. 연구 선택 후 다시 생성하면 해당 연구를 갱신합니다. 기존 `outputs/run-*` 결과도 유지합니다.
+
+데이터와 영문은 Times New Roman, 한글은 맑은 고딕을 사용합니다. 스핀 상태는 *S = 0*, *S = 1*, *S = 2*로 표시하며 반정수도 지원합니다. Figure/Table의 SEQ 번호는 Word 갱신 후에도 굵게 유지하도록 필드 전체를 서식 지정하고, 마침표 뒤 공백 한 칸을 보존합니다. 위클리 상대 에너지 표에는 a/b/c 첨자와 각주 설명을 넣지 않습니다. Dispersion·Complexation은 기본 제외이며 필요할 때 체크하여 포함합니다.
+
+Spin density는 SI Generator의 단계별 기준과 동일하게 모든 비교 구조에 공통인 원자를 추려 최대 절댓값 순서로 6개를 선택합니다. Rest/Sum은 전체 원자 데이터가 완전할 때 계산합니다. Selected geometry 자동 선택은 SI의 `suggestGeometry(records, 6)`를 직접 사용하여 결합 변화와 정렬 후 원자 이동을 반영합니다. 자동 선택은 최대 6개이며, 명시적으로 지정한 geometry는 사용자 선택을 유지합니다. 표에는 원소기호만 표시하고 원자 ID는 모델에 별도 보존합니다. 표의 위아래 셀 여백 기본값은 0 pt이고 고정 열 너비와 동일한 줄 간격을 사용합니다.

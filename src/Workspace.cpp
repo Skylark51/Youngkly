@@ -6,6 +6,10 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QDateTime>
+#include <QUuid>
+#include <QJsonDocument>
+#include <QSet>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QRegularExpression>
@@ -51,6 +55,68 @@ QString displayHeading(QString s) {
         s.replace(i->capturedStart(), i->capturedLength(), sup);
     }
     return s;
+}
+QStringList saveProjectSnapshots(const QJsonObject &model, const QJsonObject &config,
+                                 const QString &directory) {
+    const auto date = model["report_date"].toString();
+    if (!QDate::fromString(date, Qt::ISODate).isValid())
+        throw std::runtime_error("Snapshot requires a valid report date");
+    QStringList paths;
+    QSet<QString> savedProjects;
+    for (const auto &value : reportSections(model, config)) {
+        const auto id = value.toObject()["project_id"].toString();
+        if (id.isEmpty() || id.contains(QRegularExpression("[^a-zA-Z0-9_-]")))
+            throw std::runtime_error("Invalid snapshot project ID");
+        if (savedProjects.contains(id)) continue;
+        savedProjects.insert(id);
+        QJsonArray sections;
+        for (const auto &candidate : reportSections(model, config))
+            if (candidate.toObject()["project_id"] == id) sections << candidate;
+        bool hasAnalysis = false;
+        for (const auto &section : sections)
+            hasAnalysis |= !section.toObject()["analyses"].toArray().isEmpty() || !section.toObject()["future_work"].toArray().isEmpty();
+        if (!hasAnalysis) continue;
+        const auto revision = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz") + "-" +
+                              QUuid::createUuid().toString(QUuid::Id128).left(8);
+        const auto folder = QDir(directory).absoluteFilePath(date + "/" + id + "/" + revision);
+        if (!QDir().mkpath(folder + "/assets")) throw std::runtime_error("Cannot create project snapshot");
+        // Copy captures so a saved preview does not depend on a transient run folder.
+        int asset = 0;
+        for (int i = 0; i < sections.size(); ++i) {
+            auto section = sections[i].toObject(); auto groups = section["analyses"].toArray();
+            for (int g = 0; g < groups.size(); ++g) {
+                auto group = groups[g].toObject(); auto captures = group["captures"].toArray();
+                for (int c = 0; c < captures.size(); ++c) {
+                    auto capture = captures[c].toObject();
+                    for (const auto &key : {"png", "gif", "animation"}) {
+                        const auto source = capture[key].toString();
+                        if (source.isEmpty()) continue;
+                        const auto target = folder + "/assets/" + QString::number(++asset) + "." + QFileInfo(source).suffix();
+                        writeFile(target, readFile(source)); capture[key] = target;
+                    }
+                    captures[c] = capture;
+                }
+                group["captures"] = captures; groups[g] = group;
+            }
+            section["analyses"] = groups; sections[i] = section;
+        }
+        auto snapshot = model; snapshot["sections"] = sections;
+        snapshot["saved_at"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+        auto savedConfig = config; QJsonArray sources;
+        for (const auto &source : config["sources"].toArray())
+            if (source.toObject()["id"] == id) sources << source;
+        savedConfig["sources"] = sources;
+        const auto futureFile = config["future_work_file"].toString();
+        if (QFileInfo::exists(futureFile)) {
+            writeFile(folder + "/future-work.json", readFile(futureFile));
+            savedConfig["future_work_file"] = folder + "/future-work.json";
+        }
+        writeFile(folder + "/config.json", QJsonDocument(savedConfig).toJson());
+        snapshot["snapshot_config"] = folder + "/config.json";
+        const auto path = folder + "/report-model.json";
+        writeFile(path, QJsonDocument(snapshot).toJson()); paths << path;
+    }
+    return paths;
 }
 QJsonObject buildWorkspace(const QJsonObject &config, const QDate &date, bool fetch, bool resolve,
                            bool analyzeOutputs, const QString &project) {

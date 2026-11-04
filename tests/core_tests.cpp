@@ -45,9 +45,9 @@ int main(int argc, char **argv) {
               "Crop preserves foreground at viewport edges");
         QJsonArray sheetEnergyRows{QJsonArray{"TS", 1.0, 0.2, 1.2, 0.3, -0.4, 0.5, 0.0, 1.6}};
         auto siTable = siRelativeTable(sheetEnergyRows, true, true);
-        check(siTable["headers"].toArray() == QJsonArray{"", "ΔE", "ΔΔE^{a}", "E_{Total}", "ΔZ_{0}",
-                                                         "ΔΔE_{Thermal}^{b}", "-TΔS^{b}", "Δ_{Dispersion}",
-                                                         "Δ_{Complexation}", "ΔG^{c}"},
+        check(siTable["headers"].toArray() == QJsonArray{"", "ΔE", "ΔΔE", "E_{Total}", "ΔZ_{0}",
+                                                         "ΔΔE_{Thermal}", "-TΔS", "Δ_{Dispersion}",
+                                                         "Δ_{Complexation}", "ΔG"},
               "Exact SI relative headers");
         check(siTable["rows"].toArray()[0].toArray()[3] == 1.2 &&
                   siTable["rows"].toArray()[0].toArray()[9] == 1.6,
@@ -86,18 +86,20 @@ int main(int argc, char **argv) {
         check(bbName("a-freq-bb.out").isEmpty(), "No double BB");
         {
             auto gaussian = [](bool rotated, bool deformed) {
-                return QString(" #p ub3lyp/%1 freq\n\n SCF Done: E(UB3LYP) = -10.0 A.U.\n"
+                return QString(" #p ub3lyp/%1 freq %4\n\n SCF Done: E(UB3LYP) = -10.0 A.U.\n"
                     " Standard orientation:\n -----\n Center Atomic Atomic Coordinates\n Number Number Type X Y Z\n -----\n"
                     " 1 25 0 0.0 0.0 0.0\n 2 8 0 %2\n 3 1 0 %3\n -----\n"
                     " Mulliken charges and spin densities:\n 1 Mn 0.0 1.222\n 2 O 0.0 0.1\n 3 H 0.0 0.0\n\n Normal termination\n")
                     .arg(rotated ? "def2tzvpp" : "def2svp",
                          rotated ? (deformed ? "0.0 1.5 0.0" : "0.0 1.0 0.0") : "1.0 0.0 0.0",
-                         rotated ? "-1.0 0.0 0.0" : "0.0 1.0 0.0").toUtf8();
+                         rotated ? "-1.0 0.0 0.0" : "0.0 1.0 0.0")
+                    .arg(rotated ? "EmpiricalDispersion=GD3BJ" : "EmpiricalDispersion= GD3BJ").toUtf8();
             };
             const auto primary = temp.filePath("rotated-opt-freq.out"), high = temp.filePath("rotated-opt-freq-bb.out");
             writeFile(primary, gaussian(false, false)); writeFile(high, gaussian(true, false));
             const auto phrases = temp.filePath("phrases.json"); writeFile(phrases, "{}");
             QJsonObject row{{"sheet_row", 1}, {"filename", "rotated-opt-freq.out"},
+                {"analysis", QJsonObject{{"issues", QJsonArray{"Stale BB warning"}}}},
                 {"primary_source", QJsonObject{{"status", "found"}, {"local_path", primary}}},
                 {"bb_source", QJsonObject{{"status", "found"}, {"local_path", high}}}};
             QJsonObject fixture{{"rows", QJsonArray{row}}, {"spin_groups", QJsonArray{QJsonObject{
@@ -107,8 +109,10 @@ int main(int argc, char **argv) {
             const auto accepted = analyze(fixture, settings, temp.filePath("analysis-cache"));
             check(accepted["rows"].toArray()[0].toObject()["analysis"].toObject()["scf_tzvpp_hartree"].isDouble(),
                   "Rotated identical BB geometry retains TZVPP energy and spin");
-            check(accepted["analyses"].toArray()[0].toObject()["spin_table"].toObject()["rows"].toArray()[0].toArray()[0] == "Mn1",
-                  "Single optimized structure has a metal-first spin table");
+            check(accepted["analyses"].toArray()[0].toObject()["spin_table"].toObject()["rows"].toArray()[0].toArray()[0] == "Mn",
+                  "Spin table displays element symbols without atom IDs");
+            check(!accepted["analyses"].toArray()[0].toObject()["issues"].toArray().contains("Stale BB warning"),
+                  "Reanalysis discards outdated per-row issues");
             writeFile(high, gaussian(true, true));
             const auto rejectedBB = analyze(fixture, settings, temp.filePath("analysis-cache"));
             check(rejectedBB["rows"].toArray()[0].toObject()["analysis"].toObject()["scf_tzvpp_hartree"].isNull(),
@@ -156,6 +160,7 @@ int main(int argc, char **argv) {
         }
         auto spinPlan = makePlan(spinSheet, QDate(2026, 11, 5));
         auto spinGroups = spinPlan["spin_groups"].toArray();
+        check(spinGroups[0].toObject()["structure_labels"].toArray() == QJsonArray{"S = 0", "S = 1", "S = 2"}, "Spin quantum number labels");
         check(spinGroups.size() == 3 && spinGroups[0].toObject()["rows"].toArray() == QJsonArray{3,4,5},
               "Spin optimized groups preserve sheet order and separate different structures");
         check(spinGroups[1].toObject()["multiplicities"].toArray() == QJsonArray{2,4} &&

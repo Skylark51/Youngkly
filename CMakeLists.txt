@@ -7,7 +7,8 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network Xml Gui)
 find_package(ZLIB REQUIRED)
 configure_file(src/SIParser.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/SIParser.cpp" @ONLY)
 configure_file(src/SIModel.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/SIModel.cpp" @ONLY)
-add_library(youngkly_core src/Archive.cpp src/Sheet.cpp src/Pipeline.cpp src/FileTransfer.cpp src/GaussianStore.cpp src/Alignment.cpp src/AtomMapping.cpp src/Narrative.cpp src/FutureWork.cpp src/Docx.cpp src/Workspace.cpp src/RelativeTable.cpp src/CaptureCrop.cpp "${SI_SOURCE_DIR}/src/StructureLabels.cpp"
+configure_file(src/SILabels.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/SILabels.cpp" @ONLY)
+add_library(youngkly_core src/Archive.cpp src/Sheet.cpp src/Pipeline.cpp src/FileTransfer.cpp src/GaussianStore.cpp src/Alignment.cpp src/AtomMapping.cpp src/Narrative.cpp src/FutureWork.cpp src/Docx.cpp src/Workspace.cpp src/RelativeTable.cpp src/CaptureCrop.cpp "${CMAKE_CURRENT_BINARY_DIR}/SILabels.cpp"
   "${CMAKE_CURRENT_BINARY_DIR}/SIParser.cpp" "${CMAKE_CURRENT_BINARY_DIR}/SIModel.cpp")
 target_include_directories(youngkly_core PUBLIC src "${SI_SOURCE_DIR}/include")
 target_link_libraries(youngkly_core PUBLIC Qt6::Core Qt6::Network Qt6::Xml Qt6::Gui ZLIB::ZLIB)

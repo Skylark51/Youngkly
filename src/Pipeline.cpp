@@ -55,7 +55,10 @@ QString routeSetting(const std::string &route, const QString &key) {
     const QRegularExpression token("\\b" + QRegularExpression::escape(key) +
         "\\s*(?:=\\s*)?(\\([^)]*\\)|[^\\s]+)", QRegularExpression::CaseInsensitiveOption);
     const auto match = token.match(QString::fromStdString(route));
-    return match.hasMatch() ? match.captured(0).simplified().toLower() : QString();
+    // Gaussian wraps route cards; whitespace around '=' is not a different method.
+    auto value = match.hasMatch() ? match.captured(1).toLower() : QString();
+    value.remove(QRegularExpression("\\s+"));
+    return value;
 }
 bool sameElectronicState(const si::GaussianResult &primary, const si::GaussianResult &singlePoint) {
     if (primary.charge != singlePoint.charge || primary.multiplicity != singlePoint.multiplicity)
@@ -69,17 +72,7 @@ bool sameElectronicState(const si::GaussianResult &primary, const si::GaussianRe
             return false;
     return true;
 }
-double contactLimit(int a, int b) {
-    if (a == 1 && b == 1)
-        return 0;
-    if (metal(a) || metal(b))
-        return 3.0;
-    if (a == 1 || b == 1)
-        return (a == 6 || b == 6) ? 1.35 : 1.8;
-    if (a == 16 || b == 16 || a == 15 || b == 15)
-        return 2.3;
-    return 1.9;
-}
+
 } // namespace
 QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &cache) {
     QElapsedTimer analysisTimer; analysisTimer.start();
@@ -166,6 +159,7 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
                         {"issues", issues}};
         records[id] = std::move(record);
         rows[i] = row;
+        sheetRows[id] = row;
     }
     plan["rows"] = rows;
     QJsonArray analyses;
@@ -301,8 +295,8 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
             issues << "Sheet profile and SI component differences disagree beyond tolerance";
         if (!arithmeticMatch)
             issues << "Sheet component sums disagree with the displayed electronic or Gibbs energy";
-        auto energyTable = siRelativeTable(energyRows, config["include_dispersion"].toBool(true),
-                                           config["include_complexation"].toBool(true));
+        auto energyTable = siRelativeTable(energyRows, config["include_dispersion"].toBool(false),
+                                           config["include_complexation"].toBool(false));
         energyTable["source"] = "sheet cached values with restored shared formulas in row cells";
         energyTable["component_checks"] = componentChecks;
         energyTable["si_component_check"] = checkedTerms != structureCount * 6 ? "incomplete"
@@ -365,7 +359,7 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
                 for (auto issue : sheetRows[id]["analysis"].toObject()["issues"].toArray())
                     issues << sheetRows[id]["filename"].toString() + ": " + issue.toString();
         }
-        // SI top-six maxima across structures, with metal sites forced to the front.
+        // SI Generator stage selection: common atom IDs ranked by maximum absolute spin.
         std::map<int, double> maxima;
         QSet<int> metals;
         for (const auto &item : r)
@@ -377,18 +371,28 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
                     metals.insert(s.atomIndex);
             }
         std::vector<int> selected;
-        for (const auto &[id, v] : maxima)
-            selected.push_back(id);
+        for (const auto &[id, v] : maxima) {
+            bool common = true;
+            std::string symbol;
+            for (const auto &item : r) {
+                const auto &spins = item.frequency.spinDensities;
+                const auto found = std::find_if(spins.begin(), spins.end(),
+                    [&](const auto &spin) { return spin.atomIndex == id; });
+                if (found == spins.end() || (!symbol.empty() && symbol != found->atom)) {
+                    common = false; break;
+                }
+                symbol = found->atom;
+            }
+            if (common) selected.push_back(id);
+        }
         std::sort(selected.begin(), selected.end(), [&](int a, int b) {
-            if (metals.contains(a) != metals.contains(b))
-                return metals.contains(a);
             return maxima[a] != maxima[b] ? maxima[a] > maxima[b] : a < b;
         });
-        selected.resize(std::min(selected.size(), std::max<size_t>(6, metals.size())));
-        QJsonArray spinRows;
+        selected.resize(std::min<size_t>(selected.size(), 6));
+        QJsonArray spinRows, spinIds;
         if (aligned)
             for (int atom : selected) {
-                const auto label = QString::fromStdString(first[atom - 1].symbol) + QString::number(atom);
+                const auto label = QString::fromStdString(first[atom - 1].symbol);
                 QJsonArray values{label};
                 for (const auto &item : r) {
                     std::optional<double> value;
@@ -399,7 +403,7 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
 
                 }
                 spinRows << values;
-
+                spinIds << atom;
             }
         if (aligned)
             for (const auto &label : {"Rest", "Sum"}) {
@@ -423,17 +427,15 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
         group["spin_table"] = QJsonObject{
             {"headers", spinHeaders},
             {"rows", spinRows},
+            {"atom_ids", spinIds},
+            {"selection", "SI Generator common atoms; top six maximum absolute spin"},
             {"basis", "TZVPP"},
-            {"metal_first", !metals.isEmpty()}};
+            {"metal_first", !selected.empty() && metals.contains(selected.front())}};
         if (metals.isEmpty())
             issues << "Metal spin data unavailable";
         QJsonArray geometryRows;
         QJsonArray geometryIds;
-        const double threshold = config["distance_change_threshold_angstrom"].toDouble(0.15);
-        const auto explicitGroups = config["reaction_rules"]
-                                        .toObject()[group["section"].toString()]
-                                        .toObject()["geometry_atom_groups"]
-                                        .toArray();
+        const auto explicitGroups = groupRule(config, group)["geometry_atom_groups"].toArray();
         if (aligned)
             for (const auto &value : explicitGroups) {
                 auto atoms = value.toArray();
@@ -443,8 +445,7 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
                 for (const auto &id : atoms) {
                     if (id.toInt() < 1 || id.toInt() > int(first.size()))
                         throw std::runtime_error("Geometry atom ID out of range");
-                    labels << QString::fromStdString(first[id.toInt() - 1].symbol) +
-                                  QString::number(id.toInt());
+                    labels << QString::fromStdString(first[id.toInt() - 1].symbol);
                 }
                 const auto unit = atoms.size() == 2 ? "Å" : "°";
                 const auto label = labels.join("−");
@@ -464,26 +465,15 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
                 geometryRows << values;
                 geometryIds << atoms;
             }
-        // Suggest changed short contacts; numerical geometry is evaluated by the SI functions.
+        // Reuse SI Generator's bond-change and displacement ranking, capped at six.
         if (aligned && explicitGroups.isEmpty())
-            for (int a = 1; a <= int(first.size()); ++a)
-                for (int b = a + 1; b <= int(first.size()); ++b) {
-                    QVector<double> ds;
-                    for (const auto &item : r)
-                        ds << *si::distance(item.frequency.finalGeometry, a, b);
-                    auto [lo, hi] = std::minmax_element(ds.begin(), ds.end());
-                    if (*lo > contactLimit(first[a - 1].atomicNumber, first[b - 1].atomicNumber) ||
-                        *hi - *lo < threshold)
-                        continue;
-                    const auto label = QString::fromStdString(first[a - 1].symbol) + QString::number(a) +
-                                       "−" + QString::fromStdString(first[b - 1].symbol) + QString::number(b);
-                    QJsonArray values{label};
-                    for (auto d : ds)
-                        values << d;
-                    geometryRows << values;
-                    geometryIds << QJsonArray{a, b};
-
-                }
+            for (const auto &pair : si::suggestGeometry(r, 6).distances) {
+                const int a = pair[0], b = pair[1];
+                QJsonArray values{QString::fromStdString(first[a - 1].symbol) + "−" +
+                                  QString::fromStdString(first[b - 1].symbol)};
+                for (const auto &item : r) values << number(si::distance(item.frequency.finalGeometry, a, b));
+                geometryRows << values; geometryIds << QJsonArray{a, b};
+            }
         QJsonArray geometryHeaders{explicitGroups.isEmpty() ? "Distance (Å)" : "Geometry (Å / °)"};
         for (const auto &label : structureLabels) geometryHeaders << label;
         group["geometry_table"] =

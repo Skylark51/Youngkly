@@ -34,7 +34,10 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QFont>
+#include <QFileDialog>
+#include <QInputDialog>
 #include <stdexcept>
+#include <algorithm>
 
 class Window : public QMainWindow {
   public:
@@ -98,6 +101,9 @@ class Window : public QMainWindow {
             checks << c;
             choices->addWidget(c);
         }
+        dispersion = new QCheckBox("Dispersion 포함"); dispersion->setChecked(config["include_dispersion"].toBool(false));
+        complexation = new QCheckBox("Complexation 포함"); complexation->setChecked(config["include_complexation"].toBool(false));
+        choices->addWidget(dispersion); choices->addWidget(complexation);
         choices->addStretch();
         selection->addWidget(box, 1);
         layout->addLayout(selection);
@@ -119,6 +125,23 @@ class Window : public QMainWindow {
         });
         connect(cancel, &QPushButton::clicked, this, [this] { cancelled = true; process.kill(); status->setText("작업을 취소했습니다."); });
         layout->addLayout(buttons);
+        auto *storage = new QHBoxLayout;
+        createPreview = new QPushButton("프리뷰 생성·저장");
+        loadSaved = new QPushButton("저장 프로젝트 불러오기");
+        exportSaved = new QPushButton("현재 프리뷰로 Word 작성"); exportSaved->setEnabled(false);
+        storage->addWidget(createPreview); storage->addWidget(loadSaved); storage->addWidget(exportSaved);
+        layout->addLayout(storage);
+        connect(createPreview, &QPushButton::clicked, this, [this] { previewOnly = true; begin(true); });
+        connect(loadSaved, &QPushButton::clicked, this, [this] { loadProject(); });
+        connect(exportSaved, &QPushButton::clicked, this, [this] {
+            try {
+                runDirectory = "outputs/run-" + QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz");
+                QDir().mkpath(runDirectory);
+                youngkly::writeFile(runDirectory + "/config.json", QJsonDocument(session).toJson());
+                sessionConfigPath = runDirectory + "/config.json";
+                stage = 1; previewOnly = false; cancelled = false; busy(true); advance();
+            } catch (const std::exception &e) { fail(QString::fromUtf8(e.what())); }
+        });
         status = new QLabel("보고 날짜와 연구 항목을 선택하세요.");
         status->setWordWrap(true);
         layout->addWidget(status);
@@ -151,11 +174,42 @@ class Window : public QMainWindow {
                 });
         connect(preview, &QPushButton::clicked, this, [this] { previewReport(); });
         connect(inspect, &QPushButton::clicked, this, [this] { begin(false); });
-        connect(generate, &QPushButton::clicked, this, [this] { begin(true); });
+        connect(generate, &QPushButton::clicked, this, [this] { previewOnly = false; begin(true); });
         connect(open, &QPushButton::clicked, this, [this] {
             QDir().mkpath("outputs");
             QDesktopServices::openUrl(QUrl::fromLocalFile(QDir(root).filePath("outputs")));
         });
+    }
+    void loadProject() {
+        try {
+            QStringList labels, paths;
+            QDirIterator files("outputs/projects", {"report-model.json"}, QDir::Files, QDirIterator::Subdirectories);
+            while (files.hasNext()) paths << files.next();
+            paths.sort(); std::reverse(paths.begin(), paths.end());
+            for (const auto &path : paths) labels << QDir("outputs/projects").relativeFilePath(path).section('/', 0, -2);
+            if (paths.isEmpty()) { status->setText("저장된 프로젝트가 없습니다. 프리뷰 생성·저장을 실행하세요."); return; }
+            bool ok = false;
+            const auto choice = QInputDialog::getItem(this, "저장 프로젝트", "날짜 / 프로젝트 / 저장 버전", labels, 0, false, &ok);
+            if (!ok) return;
+            const auto path = paths[labels.indexOf(choice)];
+            const auto model = youngkly::loadConfig(path);
+            const auto saved = youngkly::loadConfig(model["snapshot_config"].toString());
+            modelPath = path; building = true; session = saved; sessionConfigPath = model["snapshot_config"].toString();
+            date->setSelectedDate(QDate::fromString(model["report_date"].toString(), Qt::ISODate));
+            const auto sources = config["sources"].toArray();
+            for (int i = 0; i < checks.size(); ++i) {
+                bool included = false;
+                for (const auto &source : saved["sources"].toArray()) included |= source.toObject()["id"] == sources[i].toObject()["id"];
+                checks[i]->setChecked(included);
+            }
+            dispersion->setChecked(saved["include_dispersion"].toBool(false));
+            complexation->setChecked(saved["include_complexation"].toBool(false));
+            busy(false); status->setText("저장 프로젝트를 불러왔습니다. 갱신은 새 버전으로 저장됩니다."); previewReport();
+        } catch (const std::exception &e) { fail(QString::fromUtf8(e.what())); }
+    }
+    void saveProjects() {
+        const auto paths = youngkly::saveProjectSnapshots(youngkly::loadConfig(modelPath), session, "outputs/projects");
+        for (const auto &path : paths) log->appendPlainText("프로젝트 저장: " + path);
     }
     bool configureDirections(const QJsonObject &model) {
         QDialog dialog(this);
@@ -254,6 +308,22 @@ class Window : public QMainWindow {
                 for (const auto &groupValue : section["analyses"].toArray()) {
                     const auto group = groupValue.toObject();
                     column->addWidget(new QLabel("반응 단계: " + group["section"].toString(), contents));
+                    const auto captures = group["captures"].toArray();
+                    if (!captures.isEmpty()) {
+                        auto *figures = new QHBoxLayout;
+                        for (int i = 0; i < captures.size(); ++i) {
+                            auto *panel = new QVBoxLayout;
+                            auto *image = new QLabel(contents);
+                            image->setPixmap(QPixmap(captures[i].toObject()["png"].toString()).scaled(280, 220, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                            image->setAlignment(Qt::AlignCenter); panel->addWidget(image);
+                            const auto labels = group["structure_labels"].toArray();
+                            auto *label = new QLabel(i < labels.size() ? labels[i].toString() : QString(), contents);
+                            label->setAlignment(Qt::AlignCenter);
+                            QFont font("Times New Roman", 10); font.setItalic(label->text().startsWith("S = "));
+                            label->setFont(font); panel->addWidget(label); figures->addLayout(panel);
+                        }
+                        column->addLayout(figures);
+                    }
                     QStringList issues;
                     for (const auto &issue : group["issues"].toArray()) issues << issue.toString();
                     if (!issues.isEmpty()) {
@@ -281,6 +351,8 @@ class Window : public QMainWindow {
                         auto *table = new QTableWidget(rows.size(), headers.size(), contents);
                         QStringList headerLabels;
                         for (const auto &h : headers) headerLabels << h.toString();
+                        table->setFont(QFont("Times New Roman", 10));
+                        table->horizontalHeader()->setFont(QFont("Times New Roman", 10, QFont::Bold));
                         table->setHorizontalHeaderLabels(headerLabels);
                         table->setEditTriggers(QAbstractItemView::NoEditTriggers);
                         table->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -293,9 +365,12 @@ class Window : public QMainWindow {
                                     value.isNull() || value.isUndefined() ? "N/A" : value.toString();
                                 auto *cell = new QTableWidgetItem(shown);
                                 cell->setTextAlignment(Qt::AlignCenter);
+                                if (shown.startsWith("S = ")) { auto font = table->font(); font.setItalic(true); cell->setFont(font); }
                                 table->setItem(i, j, cell);
                             }
                         }
+                        table->verticalHeader()->setDefaultSectionSize(25);
+                        table->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
                         table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
                         table->setMinimumHeight(qMin(420, 70 + 32 * (rows.size() + 1)));
                         column->addWidget(table);
@@ -320,7 +395,12 @@ class Window : public QMainWindow {
     }
     void begin(bool report) {
         try {
-            session = config; cancelled = false; directionsPrompted = false;
+            const auto previousRules = session["reaction_rules"];
+            session = config;
+            if (!modelPath.isEmpty() && QFileInfo::exists(modelPath) &&
+                youngkly::loadConfig(modelPath)["report_date"].toString() == date->selectedDate().toString(Qt::ISODate) && previousRules.isObject())
+                session["reaction_rules"] = previousRules;
+            cancelled = false; directionsPrompted = false;
             runDirectory = "outputs/run-" + QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz");
             QDir().mkpath(runDirectory); modelPath = runDirectory + "/report-model.json";
             QJsonArray chosen;
@@ -333,8 +413,11 @@ class Window : public QMainWindow {
                 return;
             }
             session["sources"] = chosen;
+            session["include_dispersion"] = dispersion->isChecked();
+            session["include_complexation"] = complexation->isChecked();
+            sessionConfigPath = runDirectory + "/config.json";
             QDir().mkpath(".youngkly");
-            youngkly::writeFile(".youngkly/gui-config.json", QJsonDocument(session).toJson());
+            youngkly::writeFile(sessionConfigPath, QJsonDocument(session).toJson());
             building = report;
             stage = 0;
             log->clear();
@@ -342,7 +425,7 @@ class Window : public QMainWindow {
             status->setText(report ? "시트와 계산 결과를 읽고 있습니다."
                                    : "시트의 보고 날짜를 확인하고 있습니다.");
             QStringList args{"--config",
-                             ".youngkly/gui-config.json",
+                             sessionConfigPath,
                              "--date",
                              date->selectedDate().toString(Qt::ISODate),
                              "--fetch",
@@ -382,9 +465,9 @@ class Window : public QMainWindow {
             if (!directionsPrompted) {
                 directionsPrompted = true;
                 if (configureDirections(model)) {
-                    youngkly::writeFile(".youngkly/gui-config.json", QJsonDocument(session).toJson());
+                    youngkly::writeFile(sessionConfigPath, QJsonDocument(session).toJson());
                     status->setText("확인한 반응 방향으로 에너지 및 문장을 다시 분석합니다.");
-                    start("Youngkly-cli.exe", {"--config", ".youngkly/gui-config.json",
+                    start("Youngkly-cli.exe", {"--config", sessionConfigPath,
                           "--date", date->selectedDate().toString(Qt::ISODate),
                           "--analyze", "--out", modelPath});
                     return;
@@ -393,12 +476,17 @@ class Window : public QMainWindow {
             stage = 1;
             status->setText("분자 뷰 선택 창에서 방향과 수소 표시를 정한 뒤 저장해 주세요.");
             start("youngkly_render.exe",
-                  {modelPath, ".youngkly/gui-config.json", runDirectory + "/assets"});
+                  {modelPath, sessionConfigPath, runDirectory + "/assets"});
             return;
         }
         if (stage == 1) {
+            saveProjects();
+            if (previewOnly) {
+                previewOnly = false; busy(false);
+                status->setText("프리뷰를 날짜·프로젝트별로 저장했습니다."); previewReport(); return;
+            }
             stage = 2;
-            const auto d = date->selectedDate();
+            const auto d = QDate::fromString(youngkly::loadConfig(modelPath)["report_date"].toString(), Qt::ISODate);
             const int week = (d.day() + QDate(d.year(), d.month(), 1).dayOfWeek() - 2) / 7 + 1;
             QString author = session["report_author"].toString("이영섭");
             author.remove(QRegularExpression("[\\\\/:*?\\\"<>|]"));
@@ -407,7 +495,7 @@ class Window : public QMainWindow {
                          .arg(week)
                          .arg(d.toString("yyMMdd"));
             status->setText("Word 보고서를 작성하고 있습니다.");
-            start("Youngkly-cli.exe", {"--config", ".youngkly/gui-config.json", "--model",
+            start("Youngkly-cli.exe", {"--config", sessionConfigPath, "--model",
                                        modelPath, "--docx", output});
             return;
         }
@@ -418,6 +506,18 @@ class Window : public QMainWindow {
 
   private:
     void busy(bool value) {
+        createPreview->setEnabled(!value); loadSaved->setEnabled(!value);
+        bool rendered = false;
+        if (!value && !modelPath.isEmpty() && QFileInfo::exists(modelPath)) {
+            rendered = true;
+            for (const auto &section : youngkly::reportSections(youngkly::loadConfig(modelPath), session))
+                for (const auto &g : section.toObject()["analyses"].toArray()) {
+                    const auto group = g.toObject();
+                    if (group["status"] != "missing_outputs" && group["captures"].toArray().size() != group["rows"].toArray().size()) rendered = false;
+                }
+        }
+        exportSaved->setEnabled(!value && rendered && building);
+        dispersion->setEnabled(!value); complexation->setEnabled(!value);
         inspect->setEnabled(!value);
         generate->setEnabled(!value);
         date->setEnabled(!value);
@@ -438,7 +538,10 @@ class Window : public QMainWindow {
         if (exe == "Youngkly-cli.exe" && !QFileInfo::exists(executable)) executable = QDir(QCoreApplication::applicationDirPath()).filePath("Youngkly.exe");
         process.start(executable, args);
     }
-    QString root, output, modelPath, runDirectory;
+    QString root, output, modelPath, runDirectory, sessionConfigPath;
+    bool previewOnly = false;
+    QCheckBox *dispersion, *complexation;
+    QPushButton *createPreview, *loadSaved, *exportSaved;
     QJsonObject config, session;
     QVector<QCheckBox *> checks;
     QCalendarWidget *date;

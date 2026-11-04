@@ -137,8 +137,8 @@
     }
   ],
   "interactive_rendering": true,
-  "include_dispersion": true,
-  "include_complexation": true,
+  "include_dispersion": false,
+  "include_complexation": false,
   "download_concurrency": 3,
   "future_work_file": "config/future-work.json",
   "angle_change_threshold_degrees": 5,
@@ -146,7 +146,7 @@
     "table_text_gap_pt": 8,
     "block_gap_pt": 12,
     "cell_horizontal_pt": 4,
-    "cell_vertical_pt": 3,
+    "cell_vertical_pt": 0,
     "table_font_pt": 9,
     "wide_table_font_pt": 8,
     "energy_column_weights": [

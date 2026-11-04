@@ -30,6 +30,22 @@ int main(int argc, char **argv) {
         QTemporaryDir temp; check(temp.isValid(), "Temporary workspace");
         const auto root = temp.filePath("서버 공백"), cache = temp.filePath("cache"); QDir().mkpath(root);
         const QString name = "a-ts-freq.out", bb = "a-ts-freq-bb.out";
+        const auto originalAsset = temp.filePath("capture.png"); writeFile(originalAsset, "preserved image");
+        QJsonObject archiveGroup{{"captures", QJsonArray{QJsonObject{{"png", originalAsset}}}}};
+        QJsonObject archiveSection{{"project_id", "test"}, {"analyses", QJsonArray{archiveGroup}}};
+        QJsonObject archiveModel{{"report_date", "2026-11-04"}, {"sections", QJsonArray{archiveSection, archiveSection}}};
+        QJsonObject archiveConfig{{"sources", QJsonArray{QJsonObject{{"id", "test"}}}}};
+        const auto snapshots = saveProjectSnapshots(archiveModel, archiveConfig, temp.filePath("projects"));
+        check(snapshots.size() == 1, "One revision per project across tabs");
+        const auto savedBytes = readFile(snapshots[0]);
+        const auto nextSnapshots = saveProjectSnapshots(archiveModel, archiveConfig, temp.filePath("projects"));
+        check(nextSnapshots.size() == 1 && nextSnapshots[0] != snapshots[0] && readFile(snapshots[0]) == savedBytes,
+              "Refresh preserves the previous revision");
+        const auto restored = loadConfig(snapshots[0]);
+        const auto copiedImage = restored["sections"].toArray()[0].toObject()["analyses"].toArray()[0].toObject()["captures"].toArray()[0].toObject()["png"].toString();
+        QFile::remove(originalAsset);
+        check(readFile(copiedImage) == "preserved image" && loadConfig(restored["snapshot_config"].toString())["sources"].toArray().size() == 1,
+              "Saved preview retains assets and project config independently");
         auto fixture = [](double spin, const QString &basis) {
             return QString(" #p ub3lyp/%1 freq\n\n SCF Done: E(UB3LYP) = -123.456 A.U.\n"
                 " Mulliken charges and spin densities:\n 1 Co 0.0 %2\n\n Normal termination\n").arg(basis).arg(spin, 0, 'f', 3).toUtf8();

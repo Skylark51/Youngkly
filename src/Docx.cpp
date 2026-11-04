@@ -137,6 +137,36 @@ QString koreanFonts(QString content) {
                       "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">" +
                       content + "</root>")
                          .toUtf8());
+    // Split spin-state labels into italic runs, including captions and narrative text.
+    const auto texts = doc.elementsByTagName("w:t");
+    QVector<QDomElement> originalTexts;
+    for (int i = 0; i < texts.size(); ++i) originalTexts << texts.at(i).toElement();
+    const QRegularExpression spinState("S = [0-9]+(?:\\.[0-9]+)?");
+    for (const auto &t : originalTexts) {
+        const auto value = t.text();
+        auto matches = spinState.globalMatch(value);
+        if (!matches.hasNext()) continue;
+        const auto original = t.parentNode().toElement();
+        auto append = [&](const QString &part, bool italic) {
+            if (part.isEmpty()) return;
+            auto run = doc.createElement("w:r");
+            auto pr = original.firstChildElement("w:rPr").cloneNode(true).toElement();
+            if (pr.isNull()) pr = doc.createElement("w:rPr");
+            if (italic) { auto i = doc.createElement("w:i"); pr.appendChild(i); }
+            run.appendChild(pr);
+            auto text = doc.createElement("w:t"); text.setAttribute("xml:space", "preserve");
+            text.appendChild(doc.createTextNode(part)); run.appendChild(text);
+            original.parentNode().insertBefore(run, original);
+        };
+        int position = 0;
+        while (matches.hasNext()) {
+            const auto m = matches.next();
+            append(value.mid(position, m.capturedStart() - position), false);
+            append(m.captured(), true); position = m.capturedEnd();
+        }
+        append(value.mid(position), false);
+        original.parentNode().removeChild(original);
+    }
     auto runs = doc.elementsByTagName("w:r");
     for (int i = 0; i < runs.size(); ++i) {
         auto run = runs.at(i).toElement();
@@ -150,6 +180,10 @@ QString koreanFonts(QString content) {
             fonts = doc.createElement("w:rFonts");
             pr.insertBefore(fonts, pr.firstChild());
         }
+        fonts.setAttribute("w:ascii", "Times New Roman");
+        fonts.setAttribute("w:hAnsi", "Times New Roman");
+        fonts.removeAttribute("w:asciiTheme");
+        fonts.removeAttribute("w:hAnsiTheme");
         fonts.setAttribute("w:eastAsia", "맑은 고딕");
         fonts.removeAttribute("w:eastAsiaTheme");
     }
@@ -188,10 +222,10 @@ QString table(const QJsonObject &t, int digits, const QJsonObject &layout, int p
         "<w:tbl><w:tblPr><w:tblW w:w=\"5000\" w:type=\"pct\"/><w:jc w:val=\"center\"/><w:tblBorders><w:top w:val=\"single\" "
         "w:sz=\"6\" w:color=\"000000\"/><w:left w:val=\"nil\"/><w:bottom w:val=\"single\" w:sz=\"6\" "
         "w:color=\"000000\"/><w:right w:val=\"nil\"/><w:insideH w:val=\"nil\"/><w:insideV "
-        "w:val=\"nil\"/></w:tblBorders><w:tblLayout w:type=\"autofit\"/><w:tblCellMar><w:left w:w=\"40\" "
+        "w:val=\"nil\"/></w:tblBorders><w:tblLayout w:type=\"fixed\"/><w:tblCellMar><w:left w:w=\"40\" "
         "w:type=\"dxa\"/><w:right w:w=\"40\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr><w:tblGrid>";
     const auto horizontal = qRound(layout["cell_horizontal_pt"].toDouble(4) * 20);
-    const auto vertical = qRound(layout["cell_vertical_pt"].toDouble(3) * 20);
+    const auto vertical = qRound(layout["cell_vertical_pt"].toDouble(0) * 20);
     out.replace("w:w=\"40\"", QString("w:w=\"%1\"").arg(horizontal));
     out.replace("</w:tblCellMar>", QString("<w:top w:w=\"%1\" w:type=\"dxa\"/><w:bottom w:w=\"%1\" w:type=\"dxa\"/></w:tblCellMar>").arg(vertical));
     for (int i = 0; i < columns; ++i)
@@ -375,10 +409,15 @@ void writeReport(const QString &reference, const QString &output, const QJsonObj
     auto caption = [&](const QString &kind, int number, const QString &label) {
         const auto sequence = kind == "Figure" ? "Figure_S" : "Table_S";
         const auto prefix = "<w:r><w:rPr><w:b/></w:rPr><w:t>" + kind + " S</w:t></w:r>";
-        const auto field = QString("<w:fldSimple w:instr=\"SEQ %1 \\* ARABIC\"><w:r><w:rPr><w:b/></w:rPr><w:t>%2</w:t></w:r></w:fldSimple>")
-                               .arg(sequence).arg(number);
-        return "<w:p>" + serialize(normal.firstChildElement("w:pPr")) + prefix + field +
-               "<w:r><w:rPr><w:b/></w:rPr><w:t>. </w:t></w:r>" +
+        // Format every field run so Word retains bold when recalculating SEQ.
+        const auto field = QString(
+            "<w:r><w:rPr><w:b/></w:rPr><w:fldChar w:fldCharType=\"begin\"/></w:r>"
+            "<w:r><w:rPr><w:b/></w:rPr><w:instrText xml:space=\"preserve\"> SEQ %1 \\* ARABIC \\* CHARFORMAT </w:instrText></w:r>"
+            "<w:r><w:rPr><w:b/></w:rPr><w:fldChar w:fldCharType=\"separate\"/></w:r>"
+            "<w:r><w:rPr><w:b/></w:rPr><w:t>%2</w:t></w:r>"
+            "<w:r><w:rPr><w:b/></w:rPr><w:fldChar w:fldCharType=\"end\"/></w:r>").arg(sequence).arg(number);
+        return "<w:p><w:pPr><w:rPr><w:b/></w:rPr></w:pPr>" + prefix + field +
+               "<w:r><w:rPr><w:b/></w:rPr><w:t xml:space=\"preserve\">. </w:t></w:r>" +
                scriptRuns(label, "<w:rFonts w:ascii=\"Times New Roman\" w:eastAsia=\"맑은 고딕\"/>") + "</w:p>";
     };
     previousHeading.clear();
@@ -410,11 +449,6 @@ void writeReport(const QString &reference, const QString &output, const QJsonObj
             const auto captures = group["captures"].toArray();
             if (captures.size() != group["rows"].toArray().size())
                 throw std::runtime_error("Group images must be rendered before DOCX export");
-            if (group["kind"] == "spin_optimization") {
-                QStringList labels;
-                for (auto label : group["structure_labels"].toArray()) labels << label.toString();
-                content += p(normal, "스핀 상태별 최적화 구조: " + labels.join(" / "));
-            }
             content += "<w:p>" + serialize(normal.firstChildElement("w:pPr"));
             int captureIndex = 0;
             for (const auto &value : captures) {
@@ -494,14 +528,6 @@ void writeReport(const QString &reference, const QString &output, const QJsonObj
             content += table(group["energy_table"].toObject(), 2, layout, pageWidth);
             content += caption("Table", ++tableNumber, "Relative energy values of " + group["section"].toString() + " (kcal/mol).");
             content += oneBlankLine();
-            content += p(
-                normal,
-                "^{a} E Total = ΔE + ΔΔE.  ^{b} T = 298.15 K.  ^{c} ΔG = E Total + ΔZ0 + ΔΔE Thermal − TΔS" +
-                    QString(group["energy_table"].toObject()["include_dispersion"].toBool() ? " + ΔDispersion"
-                                                                                            : "") +
-                    QString(group["energy_table"].toObject()["include_complexation"].toBool()
-                                ? " + ΔComplexation."
-                                : "."));
             for (auto value : group["paragraphs"].toArray()) {
                 auto paragraph = value.toObject();
                 if (paragraph["template_key"] == "energy") content += p(normal, paragraph["text"].toString(), paragraph["highlight"].toBool());
@@ -517,19 +543,21 @@ void writeReport(const QString &reference, const QString &output, const QJsonObj
                 if (paragraph["template_key"] == "spin_change")
                     content += p(normal, paragraph["text"].toString(), paragraph["highlight"].toBool());
             }
+            if (!group["geometry_table"].toObject()["rows"].toArray().isEmpty()) {
             content += blankLines();
             bool hasAngles = false;
             for (auto ids : group["geometry_table"].toObject()["atom_ids"].toArray()) if (ids.toArray().size() > 2) hasAngles = true;
             content += p(normal, hasAngles ? "Selected Geometries (Å / °)" : "Selected Geometries (Å)", false, false, true);
             content += oneBlankLine(true);
             content += table(siDocumentOrientation(group["geometry_table"].toObject()), 3, layout, pageWidth);
-            content += caption("Table", ++tableNumber, "Selected geometries of " + group["section"].toString() + " (Å and °).");
+            content += caption("Table", ++tableNumber, "Selected geometries of " + group["section"].toString() + (hasAngles ? " (Å and °)." : " (Å)."));
             content += oneBlankLine();
             for (const auto &item : group["paragraphs"].toArray()) {
                 auto paragraph = item.toObject();
                 if (paragraph["template_key"] != "geometry_change")
                     continue;
                 content += p(normal, paragraph["text"].toString(), paragraph["highlight"].toBool());
+            }
             }
             for (const auto &issue : group["issues"].toArray())
                 content += p(normal, issue.toString(), true);

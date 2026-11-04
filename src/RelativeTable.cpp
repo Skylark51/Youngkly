@@ -38,8 +38,8 @@ QString relativeCellText(const QJsonValue &value, int logical, int digits) {
     return result;
 }
 QJsonObject siRelativeTable(const QJsonArray &sheetRows, bool dispersion, bool complexation) {
-    const QStringList names{"ΔE",       "ΔΔE^{a}",        "E_{Total}",        "ΔZ_{0}", "ΔΔE_{Thermal}^{b}",
-                            "-TΔS^{b}", "Δ_{Dispersion}", "Δ_{Complexation}", "ΔG^{c}"};
+    const QStringList names{"ΔE",       "ΔΔE",        "E_{Total}",        "ΔZ_{0}", "ΔΔE_{Thermal}",
+                            "-TΔS", "Δ_{Dispersion}", "Δ_{Complexation}", "ΔG"};
     auto columns = si::relativeEnergyColumns(dispersion, complexation);
     QJsonArray headers{QString()}, logical{-1}, bold, rows;
     for (int c : columns) {

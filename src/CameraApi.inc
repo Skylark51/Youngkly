@@ -13,9 +13,12 @@
         for (auto v : rotation) if (!v.isDouble() || !std::isfinite(v.toDouble())) return false;
         QQuaternion q(rotation[0].toDouble(), rotation[1].toDouble(), rotation[2].toDouble(), rotation[3].toDouble());
         if (!std::isfinite(q.lengthSquared()) || q.lengthSquared() < 1e-12) return false;
+        const auto previous = reportCameraState();
         m_target = QVector3D(target[0].toDouble(), target[1].toDouble(), target[2].toDouble());
         m_rotation = std::abs(q.lengthSquared() - 1.0f) > 1e-6f ? q.normalized() : q;
         m_distance = state["distance"].toDouble(); m_orthoScale = state["ortho_scale"].toDouble();
         m_style.perspective = state["perspective"].toBool(); m_style.perspectiveFov = state["fov"].toDouble(35);
-        update(); return true;
+        update();
+        if (previous != reportCameraState()) emit cameraChanged();
+        return true;
     }
