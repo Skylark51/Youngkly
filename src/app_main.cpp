@@ -184,16 +184,17 @@ class Window : public QMainWindow {
                 const auto ids = group["rows"].toArray();
                 if (ids.size() != 3) continue;
                 const int first = ids.at(0).toInt(), last = ids.at(2).toInt();
-                const QString key = group["section"].toString();
+                const QString key = group["rule_key"].toString(group["section"].toString());
                 auto *label = new QLabel(youngkly::displayHeading(section["project_heading"].toString()) +
-                    " / " + key + "\n" + names[first] + "  |  TS  |  " + names[last], page);
+                    " / " + group["section"].toString() + "\n" + names[first] + "  |  TS  |  " + names[last], page);
                 label->setWordWrap(true);
                 column->addWidget(label);
                 auto *combo = new QComboBox(page);
                 combo->addItem("방향 미확정 — 반응 장벽 문장 보류", 0);
                 combo->addItem("첫 번째 구조 → 세 번째 구조", 1);
                 combo->addItem("세 번째 구조 → 첫 번째 구조", 2);
-                const auto existing = rules[key].toObject();
+                const auto existing = rules.contains(key) ? rules[key].toObject() :
+                                      rules[group["section"].toString()].toObject();
                 const int reactant = existing["reactant_row_id"].toInt();
                 const int product = existing["product_row_id"].toInt();
                 combo->setCurrentIndex(reactant == first && product == last ? 1 :

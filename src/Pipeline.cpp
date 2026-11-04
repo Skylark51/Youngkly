@@ -45,6 +45,12 @@ QJsonValue number(std::optional<double> v) {
 bool metal(int z) {
     return (z >= 21 && z <= 30) || (z >= 39 && z <= 48) || (z >= 57 && z <= 80) || (z >= 89);
 }
+QJsonObject groupRule(const QJsonObject &config, const QJsonObject &group) {
+    const auto rules = config["reaction_rules"].toObject();
+    const auto key = group["rule_key"].toString();
+    return !key.isEmpty() && rules.contains(key) ? rules[key].toObject() :
+        rules[group["section"].toString()].toObject();
+}
 QString routeSetting(const std::string &route, const QString &key) {
     const QRegularExpression token("\\b" + QRegularExpression::escape(key) +
         "\\s*(?:=\\s*)?(\\([^)]*\\)|[^\\s]+)", QRegularExpression::CaseInsensitiveOption);
@@ -185,7 +191,7 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
         try {
             QVector<QVector<int>> elements;
             for (const auto &record : r) { QVector<int> e; for (const auto &a : record.frequency.finalGeometry) e << a.atomicNumber; elements << e; }
-            const auto rule = config["reaction_rules"].toObject()[group["section"].toString()].toObject();
+            const auto rule = groupRule(config, group);
             const auto mapping = atomCorrespondence(elements, rule["atom_mapping"].toArray());
             group["atom_mapping"] = mappingJson(mapping);
             group["atom_id_reference"] = spinOptimization ? "Reference structure original atom IDs" : "TS original atom IDs";
@@ -320,7 +326,7 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
                       "Stationary point validation failed: endpoints require zero imaginary modes and TS requires one");
         if (!spinOptimization && complete && energyMatch && arithmeticMatch && checkedTerms == 18 && bbComplete && stationary &&
             narrativeValues.size() == 3) {
-            const auto rule = config["reaction_rules"].toObject()[group["section"].toString()].toObject();
+            const auto rule = groupRule(config, group);
             const int reactantRow = rule["reactant_row_id"].toInt(group["reactant_row_id"].toInt());
             const int productRow = rule["product_row_id"].toInt(group["product_row_id"].toInt());
             if (reactantRow == 0 || productRow == 0 || reactantRow == productRow ||

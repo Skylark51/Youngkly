@@ -67,7 +67,10 @@ int main(int argc, char **argv) {
                     try {
                     auto group = sourceGroup;
                     group.remove("captures"); // Never retain captures from a different input/view.
-                    const auto rule = config["reaction_rules"].toObject()[group["section"].toString()].toObject();
+                    const auto allRules = config["reaction_rules"].toObject();
+                    const auto key = group["rule_key"].toString();
+                    const auto rule = !key.isEmpty() && allRules.contains(key) ? allRules[key].toObject() :
+                                      allRules[group["section"].toString()].toObject();
                     const auto ids = group["rows"].toArray();
                     const bool spinOptimization = group["kind"] == "spin_optimization";
                     if (ids.isEmpty() || (!spinOptimization && ids.size() != 3)) throw std::runtime_error("Invalid structure group");
