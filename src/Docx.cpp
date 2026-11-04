@@ -342,6 +342,33 @@ void writeReport(const QString &reference, const QString &output, const QJsonObj
     }
     auto rel = parse(package.value("word/_rels/document.xml.rels"));
     auto types = parse(package.value("[Content_Types].xml"));
+    // Discard source-document annotations, embedded objects, personal metadata
+    // and the corresponding relationship/content-type registrations.
+    auto removeLegacyRelationships = [](QDomDocument &document) {
+        auto nodes = document.elementsByTagName("Relationship");
+        for (int i = nodes.size() - 1; i >= 0; --i) {
+            auto item = nodes.at(i).toElement();
+            const auto target = item.attribute("Target"), type = item.attribute("Type");
+            if (target.contains("docProps/") || target.contains("customXml/") ||
+                target.contains("embeddings/") || type.contains("/comments") ||
+                type.contains("/people") || type.contains("/customXml"))
+                item.parentNode().removeChild(item);
+        }
+    };
+    removeLegacyRelationships(rel);
+    if (package.contains("_rels/.rels")) {
+        auto rootRelationships = parse(package.value("_rels/.rels"));
+        removeLegacyRelationships(rootRelationships);
+        package["_rels/.rels"] = rootRelationships.toByteArray();
+    }
+    auto overrides = types.elementsByTagName("Override");
+    for (int i = overrides.size() - 1; i >= 0; --i) {
+        auto item = overrides.at(i).toElement();
+        const auto name = item.attribute("PartName");
+        if (name.startsWith("/docProps/") || name.startsWith("/customXml/") ||
+            name.startsWith("/word/comments") || name.startsWith("/word/embeddings/"))
+            item.parentNode().removeChild(item);
+    }
     int imageId = 5000;
     int figureNumber = 0;
     int tableNumber = 0;
@@ -542,6 +569,21 @@ void writeReport(const QString &reference, const QString &output, const QJsonObj
     parse(package["word/document.xml"]);
     package["word/_rels/document.xml.rels"] = rel.toByteArray();
     package["[Content_Types].xml"] = types.toByteArray();
+    // Preserve only images referenced from the active OOXML relationship graphs.
+    QSet<QString> usedMedia;
+    for (auto it = package.constBegin(); it != package.constEnd(); ++it) {
+        if (!it.key().endsWith(".rels")) continue;
+        const auto relationships = parse(it.value()).elementsByTagName("Relationship");
+        for (int i = 0; i < relationships.size(); ++i) {
+            const auto item = relationships.at(i).toElement();
+            if (!item.attribute("Type").endsWith("/image")) continue;
+            auto target = item.attribute("Target");
+            if (target.startsWith("/word/media/")) usedMedia.insert(target.mid(1));
+            else if (target.startsWith("media/")) usedMedia.insert("word/" + target);
+        }
+    }
+    for (const auto &name : package.keys())
+        if (name.startsWith("word/media/") && !usedMedia.contains(name)) package.remove(name);
     auto settings = parse(package["word/settings.xml"]);
     auto update = settings.documentElement().firstChildElement("w:updateFields");
     if (update.isNull()) {
