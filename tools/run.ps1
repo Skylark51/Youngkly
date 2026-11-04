@@ -20,7 +20,9 @@ try {
   if($count -eq 0){throw "No selected rows for $Date"}
   & './build/youngkly_render.exe' 'outputs/report-model.json' '.youngkly/run-config.json' 'outputs/assets'
   if($LASTEXITCODE){throw 'Youngcraft rendering failed'}
-  $name='주간_연구_보고서_이영섭_{0}월_{1}주차_{2}.docx' -f $reportDate.Month,$Week,$reportDate.ToString('yyMMdd')
+  $author=([string]$config.report_author) -replace '[\\/:*?"<>|]', ''
+  if([string]::IsNullOrWhiteSpace($author)){$author='이영섭'}
+  $name='주간_연구_보고서_{0}_{1}월_{2}주차_{3}.docx' -f $author,$reportDate.Month,$Week,$reportDate.ToString('yyMMdd')
   & './build/Youngkly.exe' '--config' '.youngkly/run-config.json' '--model' 'outputs/report-model.json' '--docx' "outputs/$name"
   if($LASTEXITCODE){throw 'DOCX generation failed'}
 } finally {Pop-Location}
