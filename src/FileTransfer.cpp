@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QSet>
 #include <QTextStream>
 #include <future>
@@ -69,6 +70,19 @@ QJsonObject resolveFiles(QJsonObject plan, const QJsonObject &config, const QStr
         pending.insert(row["filename"].toString());
         if (!row["bb_filename"].toString().isEmpty()) pending.insert(row["bb_filename"].toString());
     }
+    QMap<QString, QSet<QString>> hints;
+    for (const auto &value : rows) {
+        const auto row = value.toObject();
+        QString text;
+        for (const auto &cell : row["cells"].toObject()) text += " " + cell.toObject()["value"].toString();
+        QSet<QString> servers;
+        for (const auto &v : config["servers"].toArray()) {
+            const auto name = v.toObject()["name"].toString();
+            if (QRegularExpression("\\b" + QRegularExpression::escape(name) + "\\b", QRegularExpression::CaseInsensitiveOption).match(text).hasMatch() ||
+                text.contains(name == "lion" ? "라이온" : name == "dumbo" ? "덤보" : "타키온")) servers.insert(name);
+        }
+        if (!servers.isEmpty()) for (const auto &key : {"filename", "bb_filename"}) hints[row[key].toString()].unite(servers);
+    }
     const int total = pending.size();
     int sshCount = 0, hits = 0, downloads = 0, completed = 0;
     qint64 bytes = 0, searchMs = 0, metadataMs = 0, downloadMs = 0;
@@ -76,10 +90,16 @@ QJsonObject resolveFiles(QJsonObject plan, const QJsonObject &config, const QStr
     const bool force = config["force_refresh"].toBool();
     QMap<QString, QJsonObject> files;
     QJsonArray audit;
+    QSet<QString> blocked;
     for (auto value : config["servers"].toArray()) {
         if (pending.isEmpty()) break;
         auto server = value.toObject();
-        auto names = pending.values(); std::sort(names.begin(), names.end());
+        auto names = pending.values();
+        names.erase(std::remove_if(names.begin(), names.end(), [&](const QString &name) {
+            return blocked.contains(name) || (hints.contains(name) && !hints[name].contains(server["name"].toString()));
+        }), names.end());
+        if (names.isEmpty()) continue;
+        std::sort(names.begin(), names.end());
         QMap<QString, QStringList> matches;
         QElapsedTimer timer; timer.start();
         QString error;
@@ -92,7 +112,7 @@ QJsonObject resolveFiles(QJsonObject plan, const QJsonObject &config, const QStr
                     QDir dir(stack.takeLast());
                     for (auto f : dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks)) {
                         if (f.isDir()) stack << f.absoluteFilePath();
-                        else if (pending.contains(f.fileName())) matches[f.fileName()] << f.absoluteFilePath();
+                        else if (names.contains(f.fileName())) matches[f.fileName()] << f.absoluteFilePath();
                     }
                 }
             } else {
@@ -115,7 +135,7 @@ QJsonObject resolveFiles(QJsonObject plan, const QJsonObject &config, const QStr
         QJsonArray requested; for (auto n : names) requested << n;
         audit << QJsonObject{{"server", server["name"]}, {"requested", requested},
                              {"status", error.isEmpty() ? "searched" : "search_error"}, {"error", error}};
-        if (!error.isEmpty()) break; // A preferred-server failure cannot prove absence.
+        if (!error.isEmpty()) { for (const auto &name : names) blocked.insert(name); continue; }
         QStringList uniquePaths, uniqueNames;
         for (const auto &name : names) {
             auto paths = matches.value(name); paths.removeDuplicates(); std::sort(paths.begin(), paths.end());

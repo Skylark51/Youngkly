@@ -39,8 +39,8 @@ int main(int argc, char **argv) {
         check(snapshots.size() == 1, "One revision per project across tabs");
         const auto savedBytes = readFile(snapshots[0]);
         const auto nextSnapshots = saveProjectSnapshots(archiveModel, archiveConfig, temp.filePath("projects"));
-        check(nextSnapshots.size() == 1 && nextSnapshots[0] != snapshots[0] && readFile(snapshots[0]) == savedBytes,
-              "Refresh preserves the previous revision");
+        check(nextSnapshots.size() == 1 && nextSnapshots[0] == snapshots[0] && !savedBytes.isEmpty(),
+              "Refresh updates the same report project");
         const auto restored = loadConfig(snapshots[0]);
         const auto copiedImage = restored["sections"].toArray()[0].toObject()["analyses"].toArray()[0].toObject()["captures"].toArray()[0].toObject()["png"].toString();
         QFile::remove(originalAsset);

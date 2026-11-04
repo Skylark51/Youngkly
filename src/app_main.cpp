@@ -34,6 +34,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QFont>
+#include <QUuid>
 #include <QFileDialog>
 #include <QInputDialog>
 #include <stdexcept>
@@ -116,6 +117,10 @@ class Window : public QMainWindow {
         buttons->addWidget(inspect);
         buttons->addWidget(generate);
         buttons->addWidget(open);
+        openWord = new QPushButton("생성된 Word 열기"); openWord->setEnabled(false); buttons->addWidget(openWord);
+        connect(openWord, &QPushButton::clicked, this, [this] {
+            if (QFileInfo::exists(output)) QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(output).absoluteFilePath()));
+        });
         buttons->addWidget(preview);
         plans = new QPushButton("Future work 편집"); buttons->addWidget(plans);
         cancel = new QPushButton("작업 취소"); cancel->setEnabled(false); buttons->addWidget(cancel);
@@ -135,7 +140,7 @@ class Window : public QMainWindow {
         connect(loadSaved, &QPushButton::clicked, this, [this] { loadProject(); });
         connect(exportSaved, &QPushButton::clicked, this, [this] {
             try {
-                runDirectory = "outputs/run-" + QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz");
+                runDirectory = QFileInfo(modelPath).absolutePath();
                 QDir().mkpath(runDirectory);
                 youngkly::writeFile(runDirectory + "/config.json", QJsonDocument(session).toJson());
                 sessionConfigPath = runDirectory + "/config.json";
@@ -177,24 +182,25 @@ class Window : public QMainWindow {
         connect(generate, &QPushButton::clicked, this, [this] { previewOnly = false; begin(true); });
         connect(open, &QPushButton::clicked, this, [this] {
             QDir().mkpath("outputs");
-            QDesktopServices::openUrl(QUrl::fromLocalFile(QDir(root).filePath("outputs")));
+            QDesktopServices::openUrl(QUrl::fromLocalFile(runDirectory.isEmpty() ? QDir(root).filePath("프로젝트 모음") : QFileInfo(runDirectory).absoluteFilePath()));
         });
     }
     void loadProject() {
         try {
             QStringList labels, paths;
-            QDirIterator files("outputs/projects", {"report-model.json"}, QDir::Files, QDirIterator::Subdirectories);
-            while (files.hasNext()) paths << files.next();
+            QDirIterator files("프로젝트 모음", {"*.youngkly_project.json"}, QDir::Files, QDirIterator::Subdirectories);
+            while (files.hasNext()) { const auto path = files.next(); if (!path.contains("/자료/")) paths << path; }
             paths.sort(); std::reverse(paths.begin(), paths.end());
-            for (const auto &path : paths) labels << QDir("outputs/projects").relativeFilePath(path).section('/', 0, -2);
+            for (const auto &path : paths) labels << QFileInfo(path).completeBaseName().replace(".youngkly_project", "");
             if (paths.isEmpty()) { status->setText("저장된 프로젝트가 없습니다. 프리뷰 생성·저장을 실행하세요."); return; }
             bool ok = false;
-            const auto choice = QInputDialog::getItem(this, "저장 프로젝트", "날짜 / 프로젝트 / 저장 버전", labels, 0, false, &ok);
+            const auto choice = QInputDialog::getItem(this, "저장 프로젝트", "주간 보고서 선택", labels, 0, false, &ok);
             if (!ok) return;
             const auto path = paths[labels.indexOf(choice)];
             const auto model = youngkly::loadConfig(path);
             const auto saved = youngkly::loadConfig(model["snapshot_config"].toString());
             modelPath = path; building = true; session = saved; sessionConfigPath = model["snapshot_config"].toString();
+            output = model["word_output"].toString(); runDirectory = QFileInfo(path).absolutePath();
             date->setSelectedDate(QDate::fromString(model["report_date"].toString(), Qt::ISODate));
             const auto sources = config["sources"].toArray();
             for (int i = 0; i < checks.size(); ++i) {
@@ -208,7 +214,13 @@ class Window : public QMainWindow {
         } catch (const std::exception &e) { fail(QString::fromUtf8(e.what())); }
     }
     void saveProjects() {
-        const auto paths = youngkly::saveProjectSnapshots(youngkly::loadConfig(modelPath), session, "outputs/projects");
+        auto model = youngkly::loadConfig(modelPath);
+        model["word_output"] = output;
+        const auto paths = youngkly::saveProjectSnapshots(model, session, "프로젝트 모음");
+        if (!paths.isEmpty()) {
+            modelPath = paths.first(); runDirectory = QFileInfo(modelPath).absolutePath();
+            sessionConfigPath = youngkly::loadConfig(modelPath)["snapshot_config"].toString();
+        }
         for (const auto &path : paths) log->appendPlainText("프로젝트 저장: " + path);
     }
     bool configureDirections(const QJsonObject &model) {
@@ -400,8 +412,8 @@ class Window : public QMainWindow {
             if (!modelPath.isEmpty() && QFileInfo::exists(modelPath) &&
                 youngkly::loadConfig(modelPath)["report_date"].toString() == date->selectedDate().toString(Qt::ISODate) && previousRules.isObject())
                 session["reaction_rules"] = previousRules;
-            cancelled = false; directionsPrompted = false;
-            runDirectory = "outputs/run-" + QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz");
+            cancelled = false; directionsPrompted = false; output.clear();
+            runDirectory = ".youngkly/work/" + QUuid::createUuid().toString(QUuid::Id128);
             QDir().mkpath(runDirectory); modelPath = runDirectory + "/report-model.json";
             QJsonArray chosen;
             auto sources = config["sources"].toArray();
@@ -483,7 +495,7 @@ class Window : public QMainWindow {
             saveProjects();
             if (previewOnly) {
                 previewOnly = false; busy(false);
-                status->setText("프리뷰를 날짜·프로젝트별로 저장했습니다."); previewReport(); return;
+                status->setText("보고서 프로젝트를 저장했습니다."); previewReport(); return;
             }
             stage = 2;
             const auto d = QDate::fromString(youngkly::loadConfig(modelPath)["report_date"].toString(), Qt::ISODate);
@@ -496,9 +508,10 @@ class Window : public QMainWindow {
                          .arg(d.toString("yyMMdd"));
             status->setText("Word 보고서를 작성하고 있습니다.");
             start("Youngkly-cli.exe", {"--config", sessionConfigPath, "--model",
-                                       modelPath, "--docx", output});
+                                       modelPath, "--docx", output, "--force-output"});
             return;
         }
+        saveProjects();
         status->setText("완료: " + QDir(root).filePath(output));
         busy(false);
         QDesktopServices::openUrl(QUrl::fromLocalFile(QDir(root).filePath(output)));
@@ -506,6 +519,7 @@ class Window : public QMainWindow {
 
   private:
     void busy(bool value) {
+        openWord->setEnabled(!value && QFileInfo::exists(output));
         createPreview->setEnabled(!value); loadSaved->setEnabled(!value);
         bool rendered = false;
         if (!value && !modelPath.isEmpty() && QFileInfo::exists(modelPath)) {
@@ -541,6 +555,7 @@ class Window : public QMainWindow {
     QString root, output, modelPath, runDirectory, sessionConfigPath;
     bool previewOnly = false;
     QCheckBox *dispersion, *complexation;
+    QPushButton *openWord;
     QPushButton *createPreview, *loadSaved, *exportSaved;
     QJsonObject config, session;
     QVector<QCheckBox *> checks;

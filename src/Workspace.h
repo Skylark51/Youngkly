@@ -9,7 +9,7 @@ QJsonObject buildWorkspace(const QJsonObject &config, const QDate &date, bool fe
 QJsonArray reportSections(const QJsonObject &model, const QJsonObject &config);
 int selectedRowCount(const QJsonObject &model);
 int tripletCount(const QJsonObject &model);
-// Immutable per-date, per-project revisions; returns saved model paths.
+// One report project containing all selected research sections, with preserved save history.
 QStringList saveProjectSnapshots(const QJsonObject &model, const QJsonObject &config,
                                  const QString &directory);
 QString displayHeading(QString heading);

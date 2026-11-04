@@ -61,25 +61,19 @@ QStringList saveProjectSnapshots(const QJsonObject &model, const QJsonObject &co
     const auto date = model["report_date"].toString();
     if (!QDate::fromString(date, Qt::ISODate).isValid())
         throw std::runtime_error("Snapshot requires a valid report date");
-    QStringList paths;
-    QSet<QString> savedProjects;
-    for (const auto &value : reportSections(model, config)) {
-        const auto id = value.toObject()["project_id"].toString();
-        if (id.isEmpty() || id.contains(QRegularExpression("[^a-zA-Z0-9_-]")))
-            throw std::runtime_error("Invalid snapshot project ID");
-        if (savedProjects.contains(id)) continue;
-        savedProjects.insert(id);
-        QJsonArray sections;
-        for (const auto &candidate : reportSections(model, config))
-            if (candidate.toObject()["project_id"] == id) sections << candidate;
-        bool hasAnalysis = false;
-        for (const auto &section : sections)
-            hasAnalysis |= !section.toObject()["analyses"].toArray().isEmpty() || !section.toObject()["future_work"].toArray().isEmpty();
-        if (!hasAnalysis) continue;
-        const auto revision = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz") + "-" +
-                              QUuid::createUuid().toString(QUuid::Id128).left(8);
-        const auto folder = QDir(directory).absoluteFilePath(date + "/" + id + "/" + revision);
-        if (!QDir().mkpath(folder + "/assets")) throw std::runtime_error("Cannot create project snapshot");
+    const auto d = QDate::fromString(date, Qt::ISODate);
+    const int week = (d.day() + QDate(d.year(), d.month(), 1).dayOfWeek() - 2) / 7 + 1;
+    const auto title = QString("%1년 %2월 %3주차 주간 보고서 (%4)").arg(d.year()).arg(d.month()).arg(week).arg(d.toString("MM-dd"));
+    const auto folder = QDir(directory).absoluteFilePath(title);
+    const auto path = folder + "/" + title + ".youngkly_project.json";
+    QJsonArray sections = reportSections(model, config);
+    // A report contains every selected research and tab, as one project.
+    const auto versionRoot = folder + "/자료";
+    int revision = 1;
+    while (QDir(versionRoot + QString("/저장 %1").arg(revision, 3, 10, QChar('0'))).exists()) ++revision;
+    const auto dataFolder = versionRoot + QString("/저장 %1").arg(revision, 3, 10, QChar('0'));
+    {
+        if (!QDir().mkpath(dataFolder + "/그림")) throw std::runtime_error("Cannot create project snapshot");
         // Copy captures so a saved preview does not depend on a transient run folder.
         int asset = 0;
         for (int i = 0; i < sections.size(); ++i) {
@@ -91,7 +85,7 @@ QStringList saveProjectSnapshots(const QJsonObject &model, const QJsonObject &co
                     for (const auto &key : {"png", "gif", "animation"}) {
                         const auto source = capture[key].toString();
                         if (source.isEmpty()) continue;
-                        const auto target = folder + "/assets/" + QString::number(++asset) + "." + QFileInfo(source).suffix();
+                        const auto target = dataFolder + "/그림/" + QString::number(++asset) + "." + QFileInfo(source).suffix();
                         writeFile(target, readFile(source)); capture[key] = target;
                     }
                     captures[c] = capture;
@@ -102,21 +96,25 @@ QStringList saveProjectSnapshots(const QJsonObject &model, const QJsonObject &co
         }
         auto snapshot = model; snapshot["sections"] = sections;
         snapshot["saved_at"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
-        auto savedConfig = config; QJsonArray sources;
-        for (const auto &source : config["sources"].toArray())
-            if (source.toObject()["id"] == id) sources << source;
-        savedConfig["sources"] = sources;
+        auto savedConfig = config;
         const auto futureFile = config["future_work_file"].toString();
         if (QFileInfo::exists(futureFile)) {
-            writeFile(folder + "/future-work.json", readFile(futureFile));
-            savedConfig["future_work_file"] = folder + "/future-work.json";
+            writeFile(dataFolder + "/future-work.json", readFile(futureFile));
+            savedConfig["future_work_file"] = dataFolder + "/future-work.json";
         }
-        writeFile(folder + "/config.json", QJsonDocument(savedConfig).toJson());
-        snapshot["snapshot_config"] = folder + "/config.json";
-        const auto path = folder + "/report-model.json";
-        writeFile(path, QJsonDocument(snapshot).toJson()); paths << path;
+        writeFile(dataFolder + "/config.json", QJsonDocument(savedConfig).toJson());
+        snapshot["snapshot_config"] = dataFolder + "/config.json";
+        snapshot["project_name"] = title;
+        snapshot["word_output"] = model["word_output"];
+        const auto word = model["word_output"].toString();
+        if (!word.isEmpty() && QFileInfo::exists(word))
+            writeFile(dataFolder + "/" + QFileInfo(word).fileName(), readFile(word));
+        const auto historyPath = dataFolder + "/" + title + ".youngkly_project.json";
+        writeFile(historyPath, QJsonDocument(snapshot).toJson());
+        writeFile(path, QJsonDocument(snapshot).toJson());
+        return {path};
     }
-    return paths;
+    return {};
 }
 QJsonObject buildWorkspace(const QJsonObject &config, const QDate &date, bool fetch, bool resolve,
                            bool analyzeOutputs, const QString &project) {
