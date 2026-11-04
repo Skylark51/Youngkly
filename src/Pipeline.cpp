@@ -45,6 +45,24 @@ QJsonValue number(std::optional<double> v) {
 bool metal(int z) {
     return (z >= 21 && z <= 30) || (z >= 39 && z <= 48) || (z >= 57 && z <= 80) || (z >= 89);
 }
+QString routeSetting(const std::string &route, const QString &key) {
+    const QRegularExpression token("\\b" + QRegularExpression::escape(key) +
+        "\\s*(?:=\\s*)?(\\([^)]*\\)|[^\\s]+)", QRegularExpression::CaseInsensitiveOption);
+    const auto match = token.match(QString::fromStdString(route));
+    return match.hasMatch() ? match.captured(0).simplified().toLower() : QString();
+}
+bool sameElectronicState(const si::GaussianResult &primary, const si::GaussianResult &singlePoint) {
+    if (primary.charge != singlePoint.charge || primary.multiplicity != singlePoint.multiplicity)
+        return false;
+    const auto methodA = QString::fromStdString(primary.method).toLower();
+    const auto methodB = QString::fromStdString(singlePoint.method).toLower();
+    if (methodA != methodB)
+        return false;
+    for (const auto &key : {QStringLiteral("scrf"), QStringLiteral("empiricaldispersion")})
+        if (routeSetting(primary.route, key) != routeSetting(singlePoint.route, key))
+            return false;
+    return true;
+}
 double contactLimit(int a, int b) {
     if (a == 1 && b == 1)
         return 0;
@@ -106,13 +124,14 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
                         if ((transform.map(source[k]) - target[k]).length() > 0.002) aligned = false;
                 } catch (...) { aligned = false; }
             }
-            if (high.success && high.normalTermination && high.basisLevel == "TZVPP" && aligned) {
+            if (high.success && high.normalTermination && high.basisLevel == "TZVPP" && aligned &&
+                sameElectronicState(record.frequency, high)) {
                 record.frequency.spinDensities = high.spinDensities;
                 record.frequency.spinSourcePath = high.path;
                 record.frequency.spinBasisLevel = high.basisLevel;
                 record.frequency.spinFallback = false;
             } else {
-                issues << "BB basis, completion or atom correspondence requires review";
+                issues << "BB basis, completion, atom correspondence or electronic state mismatch";
                 record.singlePoint.reset();
                 record.frequency.spinDensities.clear();
             }
@@ -132,6 +151,10 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
                         {"scf_svp_hartree", number(record.frequency.scfEnergy)},
                         {"scf_tzvpp_hartree", number(scfBB)},
                         {"spin_basis", QString::fromStdString(record.frequency.spinBasisLevel)},
+                        {"charge", record.frequency.charge ? QJsonValue(*record.frequency.charge) : QJsonValue(QJsonValue::Null)},
+                        {"multiplicity", record.frequency.multiplicity ? QJsonValue(*record.frequency.multiplicity) : QJsonValue(QJsonValue::Null)},
+                        {"method", QString::fromStdString(record.frequency.method)},
+                        {"route", QString::fromStdString(record.frequency.route)},
                         {"spin_source", QString::fromStdWString(record.frequency.spinSourcePath.wstring())},
                         {"xyz", xyz},
                         {"issues", issues}};
@@ -217,6 +240,7 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
         for (int i = 0; i < structureCount; ++i) {
             auto cells = sheetRows[ids[i]]["cells"].toObject();
             QJsonArray values{structureLabels[i]};
+            bool rowComplete = true;
             for (int c = 0; c < cols.size(); ++c) {
                 auto cell = cells[cols[c]].toObject();
                 bool ok;
@@ -228,7 +252,7 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
                 }
                 values << (ok ? QJsonValue(v) : QJsonValue(QJsonValue::Null));
                 if (!ok)
-                    complete = false;
+                    rowComplete = false;
                 if (c < 6 && ok && r[i].singlePoint && r.front().singlePoint &&
                     rel[i].kcalTerms[termIndex[c]] && rel[0].kcalTerms[termIndex[c]]) {
                     bool baseOk;
@@ -249,7 +273,8 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
             double gv = cells[narrativeColumn].toObject()["value"].toString().toDouble(&ok);
             if (ok)
                 narrativeValues << gv;
-            if (complete) {
+            complete = complete && rowComplete;
+            if (rowComplete) {
                 double sum = 0;
                 for (int c = 3; c <= 7; ++c)
                     sum += values[c].toDouble();
@@ -287,8 +312,19 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
                       "Stationary point validation failed: endpoints require zero imaginary modes and TS requires one");
         if (!spinOptimization && complete && energyMatch && arithmeticMatch && checkedTerms == 18 && bbComplete && stationary &&
             narrativeValues.size() == 3) {
-            const auto barrier = narrativeValues[1] - narrativeValues[0],
-                       delta = narrativeValues[2] - narrativeValues[0];
+            const auto rule = config["reaction_rules"].toObject()[group["section"].toString()].toObject();
+            const int reactantRow = rule["reactant_row_id"].toInt(group["reactant_row_id"].toInt());
+            const int productRow = rule["product_row_id"].toInt(group["product_row_id"].toInt());
+            if (reactantRow == 0 || productRow == 0 || reactantRow == productRow ||
+                !ids.contains(reactantRow) || !ids.contains(productRow) ||
+                ids.indexOf(reactantRow) == 1 || ids.indexOf(productRow) == 1) {
+                issues << "Reaction direction not confirmed: forward barrier narrative withheld";
+            } else {
+            group["reactant_row_id"] = reactantRow;
+            group["product_row_id"] = productRow;
+            group["reaction_direction_confirmed"] = true;
+            const auto barrier = narrativeValues[1] - narrativeValues[ids.indexOf(reactantRow)],
+                       delta = narrativeValues[ids.indexOf(productRow)] - narrativeValues[ids.indexOf(reactantRow)];
             const auto basis = narrativeColumn == "N" ? "Def2-TZVPP electronic energy" : "Gibbs free energy";
             auto sentence = phrases["energy"]
                                 .toString()
@@ -300,6 +336,7 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
                                       {"highlight", false},
                                       {"template_status", "provisional"},
                                       {"sheet_energy_column", narrativeColumn}};
+            }
         }
         if (spinOptimization) {
             QStringList entries;
