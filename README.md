@@ -127,3 +127,20 @@ SSH는 기존 key 파일 경로만 참조합니다. 실제 연결 대상과 사�
 ```
 
 패키징 기본 출력은 `outputs/package/Youngkly.exe`입니다. 기존 실행 파일을 교체하지 않으며 지정 출력이 이미 있으면 중단합니다. 테스트는 core, upgrade, render_controls, future_editor의 네 묶음입니다. 검증 내역과 제한은 `docs/upgrade-validation.md`를 참고하세요.
+
+## SI Generator 형식 통합 및 Windows 업데이트
+
+Youngkly의 Word 출력은 SI Generator 방식의 구조별 행(Spin Density / Selected Geometry), 3선 테이블(0.75 pt), 구조명 위첨자·아래첨자, Figure/Table 자동 SEQ 번호를 사용합니다. Figure에는 고해상도 정적 PNG를 삽입하고 TS GIF는 별도 파일로 보존합니다. 보고서 실행 과정에서 IRC 방향을 확인하면 반응물·생성물 기준 에너지 문장이 갱신됩니다. 방향을 확정하지 않은 경로는 활성화 장벽의 정방향 해석을 보류합니다.
+
+CI는 `.github/workflows/windows-build.yml`에 있으며 Windows에서 전체 C++ 빌드, 기본 회귀 시험, SI 형식 Word DOCX 스모크 검사, 단일 실행 파일 패키징을 수행합니다. SI Generator와 Youngcraft의 정확한 의존 커밋은 `config/dependencies.lock.json`에 고정되어 있습니다. OpenGL의 실제 그래픽 품질과 원격 서버 데이터는 사용자 Windows 환경에서 별도로 검증해야 합니다.
+
+최신 `main`의 빌드 파일을 기존 프로그램이 있는 저장소에 설치하려면 PowerShell에서 실행합니다.
+
+```powershell
+gh auth login
+.\tools\update-local.ps1
+```
+
+Git과 GitHub CLI(`gh`)가 필요합니다. 스크립트는 `main`을 fast-forward로 갱신한 다음 **현재 Git 커밋에 대응하는 성공한 Actions 실행**의 `Youngkly-Windows-portable` 아티팩트를 받아 기존 `Youngkly.exe`를 `backups/`에 백업하고 새 파일로 교체합니다. 사용 중인 Youngkly를 종료한 뒤 실행하세요. 첫 실행 시 내부 런타임은 별도 버전 폴더에 자동 생성됩니다.
+
+GitHub 웹에서 `Actions → Youngkly Windows build → 성공한 main 실행 → Artifacts → Youngkly-Windows-portable`로 직접 다운로드하여 압축을 풀고 `Youngkly.exe`를 교체해도 됩니다. 사용자가 수정한 설정, Future work 및 보고서 폴더는 유지하세요.
