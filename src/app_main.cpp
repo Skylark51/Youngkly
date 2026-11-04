@@ -1,5 +1,6 @@
 #include "Archive.h"
 #include "Pipeline.h"
+#include "RelativeTable.h"
 #include "Workspace.h"
 #include "FutureEditor.h"
 #include "FutureWork.h"
@@ -11,6 +12,11 @@
 #include <QDirIterator>
 #include <QFileInfo>
 #include <QGroupBox>
+#include <QDialog>
+#include <QHeaderView>
+#include <QScrollArea>
+#include <QTableWidget>
+#include <QTabWidget>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
@@ -46,7 +52,8 @@ class Window : public QMainWindow {
         }
         config = youngkly::loadConfig("config/youngkly.json");
         setWindowTitle("Youngkly");
-        resize(800, 700);
+        resize(1200, 800);
+        setMinimumSize(900, 620);
         auto *center = new QWidget;
         auto *layout = new QVBoxLayout(center);
         setCentralWidget(center);
@@ -95,9 +102,12 @@ class Window : public QMainWindow {
         inspect = new QPushButton("시트 날짜 확인");
         generate = new QPushButton("Word 보고서 작성");
         open = new QPushButton("결과 폴더 열기");
+        preview = new QPushButton("SI 형식 표 미리보기");
+        preview->setEnabled(false);
         buttons->addWidget(inspect);
         buttons->addWidget(generate);
         buttons->addWidget(open);
+        buttons->addWidget(preview);
         plans = new QPushButton("Future work 편집"); buttons->addWidget(plans);
         cancel = new QPushButton("작업 취소"); cancel->setEnabled(false); buttons->addWidget(cancel);
         connect(plans, &QPushButton::clicked, this, [this] {
@@ -136,12 +146,87 @@ class Window : public QMainWindow {
                         fail(QString::fromUtf8(e.what()));
                     }
                 });
+        connect(preview, &QPushButton::clicked, this, [this] { previewReport(); });
         connect(inspect, &QPushButton::clicked, this, [this] { begin(false); });
         connect(generate, &QPushButton::clicked, this, [this] { begin(true); });
         connect(open, &QPushButton::clicked, this, [this] {
             QDir().mkpath("outputs");
             QDesktopServices::openUrl(QUrl::fromLocalFile(QDir(root).filePath("outputs")));
         });
+    }
+    void previewReport() {
+        if (modelPath.isEmpty() || !QFileInfo::exists(modelPath)) return;
+        try {
+            const auto model = youngkly::loadConfig(modelPath);
+            QDialog dialog(this);
+            dialog.setWindowTitle("Youngkly — SI Generator 형식 보고서 미리보기");
+            dialog.resize(1140, 760);
+            auto *layout = new QVBoxLayout(&dialog);
+            auto *tabs = new QTabWidget(&dialog);
+            const auto sections = youngkly::reportSections(model, session);
+            for (const auto &sectionValue : sections) {
+                const auto section = sectionValue.toObject();
+                if (section["analyses"].toArray().isEmpty()) continue;
+                auto *area = new QScrollArea(tabs);
+                area->setWidgetResizable(true);
+                auto *contents = new QWidget(area);
+                auto *column = new QVBoxLayout(contents);
+                auto *title = new QLabel(youngkly::displayHeading(section["project_heading"].toString()), contents);
+                QFont heading = title->font(); heading.setBold(true); heading.setPointSize(12); title->setFont(heading);
+                column->addWidget(title);
+                for (const auto &groupValue : section["analyses"].toArray()) {
+                    const auto group = groupValue.toObject();
+                    column->addWidget(new QLabel("반응 단계: " + group["section"].toString(), contents));
+                    for (const auto &entry : {qMakePair("Relative energy", "energy_table"),
+                                              qMakePair("Mulliken spin density", "spin_table"),
+                                              qMakePair("Selected geometry", "geometry_table")}) {
+                        auto t = group[entry.second].toObject();
+                        if (entry.second != QStringLiteral("energy_table"))
+                            t = youngkly::siDocumentOrientation(t);
+                        const auto headers = t["headers"].toArray(), rows = t["rows"].toArray();
+                        if (headers.isEmpty()) continue;
+                        auto *label = new QLabel(entry.first, contents);
+                        QFont font = label->font(); font.setBold(true); label->setFont(font);
+                        column->addWidget(label);
+                        auto *table = new QTableWidget(rows.size(), headers.size(), contents);
+                        QStringList headerLabels;
+                        for (const auto &h : headers) headerLabels << h.toString();
+                        table->setHorizontalHeaderLabels(headerLabels);
+                        table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+                        table->setSelectionBehavior(QAbstractItemView::SelectRows);
+                        for (int i = 0; i < rows.size(); ++i) {
+                            const auto values = rows[i].toArray();
+                            for (int j = 0; j < headers.size(); ++j) {
+                                const auto value = j < values.size() ? values[j] : QJsonValue();
+                                const QString shown = value.isDouble() ?
+                                    QString::number(value.toDouble(), 'f', entry.second == QStringLiteral("energy_table") ? 2 : 3) :
+                                    value.isNull() || value.isUndefined() ? "N/A" : value.toString();
+                                auto *cell = new QTableWidgetItem(shown);
+                                cell->setTextAlignment(Qt::AlignCenter);
+                                table->setItem(i, j, cell);
+                            }
+                        }
+                        table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+                        table->setMinimumHeight(qMin(420, 70 + 32 * (rows.size() + 1)));
+                        column->addWidget(table);
+                    }
+                }
+                column->addStretch();
+                area->setWidget(contents);
+                tabs->addTab(area, section["sheet"].toString());
+            }
+            if (tabs->count() == 0) {
+                auto *empty = new QLabel("해당 날짜의 분석된 구조가 없습니다.", tabs);
+                tabs->addTab(empty, "미리보기");
+            }
+            layout->addWidget(tabs);
+            auto *close = new QPushButton("닫기", &dialog);
+            connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
+            layout->addWidget(close);
+            dialog.exec();
+        } catch (const std::exception &e) {
+            fail(QString::fromUtf8(e.what()));
+        }
     }
     void begin(bool report) {
         try {
@@ -236,6 +321,7 @@ class Window : public QMainWindow {
         selectAll->setEnabled(!value);
         clearAll->setEnabled(!value);
         plans->setEnabled(!value); cancel->setEnabled(value);
+        preview->setEnabled(!value && !modelPath.isEmpty() && QFileInfo::exists(modelPath));
         for (auto *c : checks)
             c->setEnabled(!value);
     }
@@ -254,7 +340,7 @@ class Window : public QMainWindow {
     QVector<QCheckBox *> checks;
     QCalendarWidget *date;
     QPlainTextEdit *log;
-    QPushButton *inspect, *generate, *open, *plans, *cancel, *selectAll, *clearAll;
+    QPushButton *inspect, *generate, *open, *preview, *plans, *cancel, *selectAll, *clearAll;
     QLabel *status;
     QProcess process;
     bool building = false, cancelled = false;
