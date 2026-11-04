@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: youngkly-windows-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-2022
@@ -40,37 +44,26 @@ jobs:
             mingw-w64-ucrt-x86_64-zlib
             mingw-w64-ucrt-x86_64-binutils
       - name: Configure
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
-          & C:/msys64/ucrt64/bin/cmake.exe -S Youngkly -B Youngkly/build -G Ninja `
-            -DCMAKE_MAKE_PROGRAM=C:/msys64/ucrt64/bin/ninja.exe `
-            -DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe `
-            -DCMAKE_PREFIX_PATH=C:/msys64/ucrt64 `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DSI_SOURCE_DIR="$env:GITHUB_WORKSPACE/SIGenerator/native" `
-            -DYOUNGCRAFT_SOURCE_DIR="$env:GITHUB_WORKSPACE/Youngcraft"
-          if ($LASTEXITCODE -ne 0) { throw "Configure failed" }
+          cmake -S Youngkly -B Youngkly/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSI_SOURCE_DIR="$PWD/SIGenerator/native" \
+            -DYOUNGCRAFT_SOURCE_DIR="$PWD/Youngcraft"
       - name: Compile all targets
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
-          & C:/msys64/ucrt64/bin/cmake.exe --build Youngkly/build --parallel 4
-          if ($LASTEXITCODE -ne 0) { throw "Build failed" }
+          cmake --build Youngkly/build --parallel 4
       - name: Core regression tests
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
-          & C:/msys64/ucrt64/bin/ctest.exe --test-dir Youngkly/build --output-on-failure -E render_controls
-          if ($LASTEXITCODE -ne 0) { throw "Core tests failed" }
+          ctest --test-dir Youngkly/build --output-on-failure -E render_controls
       - name: Package single-file Windows executable
-        shell: pwsh
-        working-directory: Youngkly
+        shell: msys2 {0}
         run: |
-          $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
-          & ./tools/package.ps1 -ToolRoot C:/ -BuildDirectory build -OutputPath outputs/package/Youngkly.exe
-          if ($LASTEXITCODE -ne 0) { throw "Packaging failed" }
-          if (-not (Test-Path outputs/package/Youngkly.exe)) { throw "Portable EXE missing" }
+          cd Youngkly
+          pwsh.exe -NoProfile -File ./tools/package.ps1 -ToolRoot C:/ -BuildDirectory build -OutputPath outputs/package/Youngkly.exe
+          test -f outputs/package/Youngkly.exe
       - name: Upload portable executable
         uses: actions/upload-artifact@v4
         with:
