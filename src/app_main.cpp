@@ -26,6 +26,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QPushButton>
 #include <QStandardPaths>
 #include <QTimer>
@@ -252,6 +253,19 @@ class Window : public QMainWindow {
                 for (const auto &groupValue : section["analyses"].toArray()) {
                     const auto group = groupValue.toObject();
                     column->addWidget(new QLabel("반응 단계: " + group["section"].toString(), contents));
+                    QStringList issues;
+                    for (const auto &issue : group["issues"].toArray()) issues << issue.toString();
+                    if (!issues.isEmpty()) {
+                        auto *warning = new QLabel("검증 필요: " + issues.join(" | "), contents);
+                        warning->setWordWrap(true);
+                        column->addWidget(warning);
+                    }
+                    const auto rmsd = group["group_view"].toObject()["alignment_anchor_rmsd_angstrom"].toArray();
+                    if (!rmsd.isEmpty()) {
+                        QStringList values;
+                        for (const auto &value : rmsd) values << QString::number(value.toDouble(), 'f', 3);
+                        column->addWidget(new QLabel("Anchor alignment RMSD (Å): " + values.join(" / "), contents));
+                    }
                     for (const auto &entry : {qMakePair("Relative energy", "energy_table"),
                                               qMakePair("Mulliken spin density", "spin_table"),
                                               qMakePair("Selected geometry", "geometry_table")}) {
@@ -385,8 +399,10 @@ class Window : public QMainWindow {
             stage = 2;
             const auto d = date->selectedDate();
             const int week = (d.day() + QDate(d.year(), d.month(), 1).dayOfWeek() - 2) / 7 + 1;
-            output = runDirectory + QString("/주간_연구_보고서_이영섭_%1월_%2주차_%3.docx")
-                         .arg(d.month())
+            QString author = session["report_author"].toString("이영섭");
+            author.remove(QRegularExpression("[\\\\/:*?\\\"<>|]"));
+            output = runDirectory + QString("/주간_연구_보고서_%1_%2월_%3주차_%4.docx")
+                         .arg(author).arg(d.month())
                          .arg(week)
                          .arg(d.toString("yyMMdd"));
             status->setText("Word 보고서를 작성하고 있습니다.");
