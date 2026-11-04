@@ -62,7 +62,7 @@ jobs:
         shell: msys2 {0}
         run: |
           cd Youngkly
-          pwsh.exe -NoProfile -File ./tools/package.ps1 -ToolRoot C:/ -BuildDirectory build -OutputPath outputs/package/Youngkly.exe
+          "/c/Program Files/PowerShell/7/pwsh.exe" -NoProfile -File ./tools/package.ps1 -ToolRoot C:/ -BuildDirectory build -OutputPath outputs/package/Youngkly.exe
           test -f outputs/package/Youngkly.exe
       - name: Upload portable executable
         uses: actions/upload-artifact@v4
