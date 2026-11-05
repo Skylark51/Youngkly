@@ -6,6 +6,7 @@
 #include "Narrative.h"
 #include "Pipeline.h"
 #include "Workspace.h"
+#include "RelativeTable.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
@@ -26,6 +27,36 @@ int main(int argc, char **argv) {
             auto sections = reportSections(model, config);
             for (int i = 0; i < sections.size(); ++i) sections[i] = analyze(sections[i].toObject(), config, args[5]);
             model["sections"] = sections; writeFile(args[4], QJsonDocument(model).toJson()); return 0;
+        }
+        {
+            const QJsonArray raw{QJsonArray{"TS", 1., 2., 3., 4., 5., 6., 7., 28.}};
+            auto energy = siRelativeTable(raw, false, false);
+            energy["source_rows"] = raw; energy["component_check"] = "preserved";
+            QJsonObject group{{"energy_table", energy}, {"captures", QJsonArray{"existing.png"}}};
+            QJsonObject sourceModel{{"sections", QJsonArray{QJsonObject{{"analyses", QJsonArray{group}}}}}};
+            const QJsonObject options{{"include_dispersion", true}, {"include_complexation", true}};
+            auto output = reportSections(sourceModel, options)[0].toObject()["analyses"].toArray()[0].toObject();
+            auto table = output["energy_table"].toObject();
+            check(table["logical_columns"].toArray().contains(6) && table["logical_columns"].toArray().contains(7),
+                  "Output-time options add both optional columns");
+            check(table["rows"].toArray()[0].toArray().contains(7.) &&
+                  table["component_check"] == "preserved" && output["captures"] == group["captures"],
+                  "Output options preserve dispersion values, validation and existing captures");
+            check(sourceModel["sections"].toArray()[0].toObject()["analyses"].toArray()[0].toObject()["energy_table"] == energy,
+                  "Report output does not mutate the saved model");
+            QJsonObject cells;
+            const QStringList columns{"L", "M", "N", "O", "P", "Q", "R", "S"};
+            for (int i = 0; i < columns.size(); ++i) cells[columns[i]] = QJsonObject{{"value", QString::number(raw[0].toArray()[i + 1].toDouble())}};
+            energy.remove("source_rows"); group["energy_table"] = energy; group["rows"] = QJsonArray{12};
+            sourceModel["sections"] = QJsonArray{QJsonObject{{"analyses", QJsonArray{group}},
+                {"rows", QJsonArray{QJsonObject{{"sheet_row", 12}, {"cells", cells}}}}}};
+            table = reportSections(sourceModel, options)[0].toObject()["analyses"].toArray()[0].toObject()["energy_table"].toObject();
+            check(table["rows"] == output["energy_table"].toObject()["rows"],
+                  "Legacy projects restore optional values from saved sheet cells");
+            auto hidden = reportSections(sourceModel, QJsonObject{{"include_dispersion", false}, {"include_complexation", false}})
+                [0].toObject()["analyses"].toArray()[0].toObject()["energy_table"].toObject();
+            check(!hidden["logical_columns"].toArray().contains(6) && !hidden["logical_columns"].toArray().contains(7),
+                  "Final report options can hide both columns again");
         }
         QTemporaryDir temp; check(temp.isValid(), "Temporary workspace");
         const auto root = temp.filePath("서버 공백"), cache = temp.filePath("cache"); QDir().mkpath(root);

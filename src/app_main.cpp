@@ -19,6 +19,9 @@
 #include <QScrollArea>
 #include <QTableWidget>
 #include <QTabWidget>
+#include <QStackedWidget>
+#include <QGridLayout>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
@@ -65,35 +68,60 @@ class Window : public QMainWindow {
         auto *center = new QWidget;
         auto *layout = new QVBoxLayout(center);
         setCentralWidget(center);
-        auto *selection = new QHBoxLayout;
-        auto *dateBox = new QGroupBox("보고 날짜");
-        auto *dateLayout = new QVBoxLayout(dateBox);
+        pages = new QStackedWidget;
+        layout->addWidget(pages, 3);
+        auto *projectPage = new QWidget;
+        auto *projectLayout = new QVBoxLayout(projectPage);
+        auto *researchPage = new QWidget;
+        auto *researchLayout = new QVBoxLayout(researchPage);
+        auto *reportPage = new QWidget;
+        auto *reportLayout = new QVBoxLayout(reportPage);
+        pages->addWidget(projectPage); pages->addWidget(researchPage); pages->addWidget(reportPage);
+        auto *dateBox = new QGroupBox("보고 날짜 · 저장 프로젝트");
+        auto *dateLayout = new QHBoxLayout(dateBox);
+        auto *calendarColumn = new QVBoxLayout;
+        auto *projectColumn = new QVBoxLayout;
+        dateLayout->addLayout(calendarColumn, 1); dateLayout->addLayout(projectColumn, 1);
         auto *caption = new QLabel("날먹하고싶다");
         caption->setAlignment(Qt::AlignCenter);
-        dateLayout->addWidget(caption);
+        calendarColumn->addWidget(caption);
         date = new QCalendarWidget;
         date->setMinimumWidth(300);
+        date->setMinimumHeight(240);
         date->setSelectedDate(QDate::currentDate());
         date->setVerticalHeaderFormat(QCalendarWidget::NoVerticalHeader);
         date->setFirstDayOfWeek(Qt::Monday);
-        dateLayout->addWidget(date);
+        calendarColumn->addWidget(date);
         newProject = new QPushButton("새 보고서 프로젝트 만들기");
         newProject->setObjectName("createReportProject");
-        dateLayout->addWidget(newProject);
+        calendarColumn->addWidget(newProject);
         connect(newProject, &QPushButton::clicked, this, [this] { createReportProject(); });
         auto *steps = new QLabel("① 보고 날짜 선택 → 새 프로젝트 만들기\n② 연구 선택 → 시트·서버에서 자료 가져오기\n③ 프리뷰 확인 → Word 작성");
-        steps->setWordWrap(true); dateLayout->addWidget(steps);
-        dateLayout->addWidget(new QLabel("저장된 보고서 프로젝트"));
+        steps->setWordWrap(true); calendarColumn->addWidget(steps);
+        calendarColumn->addStretch();
+        projectColumn->addWidget(new QLabel("저장된 보고서 프로젝트"));
         projectList = new QListWidget;
         projectList->setObjectName("savedReportProjects");
         projectList->setWordWrap(true);
         projectList->setMinimumHeight(120);
         projectList->setMaximumHeight(210);
-        dateLayout->addWidget(projectList, 1);
+        projectColumn->addWidget(projectList, 1);
         connect(projectList, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
             if (!item->data(Qt::UserRole).toString().isEmpty()) loadProjectPath(item->data(Qt::UserRole).toString(), false);
         });
-        selection->addWidget(dateBox);
+        auto *management = new QVBoxLayout;
+        deleteProject = new QPushButton("선택 프로젝트 삭제");
+        deleteProject->setObjectName("deleteReportProject");
+        auto *projectFolder = new QPushButton("선택 프로젝트 폴더 열기");
+        management->addWidget(projectFolder); management->addWidget(deleteProject);
+        projectColumn->addLayout(management);
+        connect(deleteProject, &QPushButton::clicked, this, [this] { removeProject(); });
+        connect(projectFolder, &QPushButton::clicked, this, [this] {
+            auto *item = projectList->currentItem();
+            if (item && !item->data(Qt::UserRole).toString().isEmpty())
+                QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(item->data(Qt::UserRole).toString()).absolutePath()));
+        });
+        projectLayout->addWidget(dateBox);
         auto *box = new QGroupBox("보고서에 포함할 연구");
         auto *choices = new QVBoxLayout(box);
         auto *selectionButtons = new QHBoxLayout;
@@ -120,42 +148,72 @@ class Window : public QMainWindow {
         }
         dispersion = new QCheckBox("Dispersion 포함"); dispersion->setChecked(config["include_dispersion"].toBool(false));
         complexation = new QCheckBox("Complexation 포함"); complexation->setChecked(config["include_complexation"].toBool(false));
-        choices->addWidget(dispersion); choices->addWidget(complexation);
+        auto *reportOptions = new QGroupBox("최종 SI 보고서 · 에너지 표 포함 항목");
+        auto *reportOptionsLayout = new QVBoxLayout(reportOptions);
+        reportOptionsLayout->addWidget(dispersion); reportOptionsLayout->addWidget(complexation);
+        reportLayout->addWidget(reportOptions);
         choices->addStretch();
-        selection->addWidget(box, 1);
-        layout->addLayout(selection);
-        auto *buttons = new QHBoxLayout;
+        researchLayout->addWidget(box, 1);
+        auto *buttons = new QGridLayout;
         inspect = new QPushButton("시트 날짜 확인");
         generate = new QPushButton("Word 보고서 작성");
         open = new QPushButton("결과 폴더 열기");
         preview = new QPushButton("SI 형식 표 미리보기");
         preview->setEnabled(false);
-        buttons->addWidget(inspect);
-        buttons->addWidget(generate);
-        buttons->addWidget(open);
-        openWord = new QPushButton("생성된 Word 열기"); openWord->setEnabled(false); buttons->addWidget(openWord);
+
+        buttons->addWidget(generate, 0, 0);
+        buttons->addWidget(open, 0, 1);
+        openWord = new QPushButton("생성된 Word 열기"); openWord->setEnabled(false); buttons->addWidget(openWord, 0, 2);
         connect(openWord, &QPushButton::clicked, this, [this] {
             if (QFileInfo::exists(output)) QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(output).absoluteFilePath()));
         });
-        buttons->addWidget(preview);
-        plans = new QPushButton("Future work 편집"); buttons->addWidget(plans);
-        cancel = new QPushButton("작업 취소"); cancel->setEnabled(false); buttons->addWidget(cancel);
+        buttons->addWidget(preview, 1, 0);
+        plans = new QPushButton("Future work 편집"); buttons->addWidget(plans, 1, 1);
+        cancel = new QPushButton("작업 취소"); cancel->setEnabled(false); buttons->addWidget(cancel, 1, 2);
         connect(plans, &QPushButton::clicked, this, [this] {
             try { editFutureWork(this, config, date->selectedDate()); }
             catch (const std::exception &e) { fail(QString::fromUtf8(e.what())); }
         });
         connect(cancel, &QPushButton::clicked, this, [this] { cancelled = true; process.kill(); status->setText("작업을 취소했습니다."); });
-        layout->addLayout(buttons);
+        reportLayout->addLayout(buttons);
         auto *storage = new QHBoxLayout;
         createPreview = new QPushButton("시트·서버에서 자료 가져오기");
         loadSaved = new QPushButton("저장 프로젝트 불러오기");
         exportSaved = new QPushButton("현재 프리뷰로 Word 작성"); exportSaved->setEnabled(false);
-        storage->addWidget(createPreview); storage->addWidget(loadSaved); storage->addWidget(exportSaved);
-        layout->addLayout(storage);
+        researchLayout->addWidget(createPreview);
+        researchLayout->addWidget(inspect);
+        projectLayout->addWidget(loadSaved);
+        storage->addWidget(exportSaved);
+        reportLayout->addLayout(storage);
+        reportLayout->addStretch();
+        auto *navigation = new QHBoxLayout;
+        previousPage = new QPushButton("← 이전"); nextPage = new QPushButton("다음 →");
+        previousPage->setObjectName("previousPage"); nextPage->setObjectName("nextPage");
+        pageLabel = new QLabel;
+        navigation->addWidget(previousPage); navigation->addStretch(); navigation->addWidget(pageLabel);
+        navigation->addStretch(); navigation->addWidget(nextPage);
+        layout->addLayout(navigation);
+        auto updatePage = [this] {
+            const QStringList titles{"프로젝트 관리", "연구 선택 · 자료 가져오기", "최종 SI 보고서 작성"};
+            const int index = pages->currentIndex();
+            pageLabel->setText(QString("%1 / 3 · %2").arg(index + 1).arg(titles[index]));
+            previousPage->setEnabled(index > 0); nextPage->setEnabled(index < 2);
+        };
+        connect(pages, &QStackedWidget::currentChanged, this, [updatePage](int) { updatePage(); });
+        connect(previousPage, &QPushButton::clicked, this, [this] { pages->setCurrentIndex(pages->currentIndex() - 1); });
+        connect(nextPage, &QPushButton::clicked, this, [this] {
+            if (pages->currentIndex() == 0 && (modelPath.isEmpty() ||
+                youngkly::loadConfig(modelPath)["report_date"].toString() != date->selectedDate().toString(Qt::ISODate)))
+                if (!createReportProject()) return;
+            pages->setCurrentIndex(pages->currentIndex() + 1);
+        });
+        updatePage();
         connect(createPreview, &QPushButton::clicked, this, [this] { previewOnly = true; begin(true); });
         connect(loadSaved, &QPushButton::clicked, this, [this] { loadProject(); });
         connect(exportSaved, &QPushButton::clicked, this, [this] {
             try {
+                session["include_dispersion"] = dispersion->isChecked();
+                session["include_complexation"] = complexation->isChecked();
                 runDirectory = QFileInfo(modelPath).absolutePath();
                 QDir().mkpath(runDirectory);
                 youngkly::writeFile(runDirectory + "/config.json", QJsonDocument(session).toJson());
@@ -230,6 +288,27 @@ class Window : public QMainWindow {
             status->setText("프로젝트를 만들었습니다. 연구를 선택하고 ‘시트·서버에서 자료 가져오기’를 누르세요.");
             return true;
         } catch (const std::exception &e) { fail(QString::fromUtf8(e.what())); return false; }
+    }
+    void removeProject() {
+        auto *item = projectList->currentItem();
+        if (!item || item->data(Qt::UserRole).toString().isEmpty()) return;
+        const auto projectPath = item->data(Qt::UserRole).toString();
+        const auto folder = QFileInfo(projectPath).canonicalPath();
+        const auto projectRoot = QFileInfo(QDir(root).filePath("프로젝트 모음")).canonicalFilePath();
+        // Only whole report folders immediately inside the workspace project directory are eligible.
+        if (folder.isEmpty() || projectRoot.isEmpty() ||
+            QString::compare(QFileInfo(folder).dir().canonicalPath(), projectRoot, Qt::CaseInsensitive) != 0) {
+            fail("프로젝트 폴더 경로를 확인할 수 없어 삭제하지 않았습니다."); return;
+        }
+        if (QMessageBox::question(this, "프로젝트 삭제", item->text() +
+            "\n프로젝트와 저장된 그림·Word·이전 저장본을 휴지통으로 이동할까요?") != QMessageBox::Yes) return;
+        if (!QFile::moveToTrash(folder)) { fail("휴지통으로 이동하지 못했습니다. 열린 파일을 닫고 다시 시도하세요."); return; }
+        if (QFileInfo(modelPath).absolutePath().startsWith(folder + "/", Qt::CaseInsensitive) ||
+            QString::compare(QFileInfo(modelPath).absolutePath(), folder, Qt::CaseInsensitive) == 0) {
+            modelPath.clear(); runDirectory.clear(); output.clear(); sessionConfigPath.clear();
+            session = {}; building = false;
+        }
+        refreshProjects(); busy(false); status->setText("선택한 프로젝트를 휴지통으로 이동했습니다.");
     }
     void refreshProjects() {
         const auto selected = projectList->currentItem() ? projectList->currentItem()->data(Qt::UserRole).toString() : QString();
@@ -370,6 +449,8 @@ class Window : public QMainWindow {
     void previewReport() {
         if (modelPath.isEmpty() || !QFileInfo::exists(modelPath)) return;
         try {
+            session["include_dispersion"] = dispersion->isChecked();
+            session["include_complexation"] = complexation->isChecked();
             const auto model = youngkly::loadConfig(modelPath);
             QDialog dialog(this);
             dialog.setWindowTitle("Youngkly — SI Generator 형식 보고서 미리보기");
@@ -467,6 +548,21 @@ class Window : public QMainWindow {
                 tabs->addTab(empty, "미리보기");
             }
             layout->addWidget(tabs);
+            auto *pageButtons = new QHBoxLayout;
+            auto *previous = new QPushButton("← 이전 연구", &dialog);
+            auto *next = new QPushButton("다음 연구 →", &dialog);
+            auto *position = new QLabel(&dialog);
+            auto updatePosition = [tabs, previous, next, position] {
+                previous->setEnabled(tabs->currentIndex() > 0);
+                next->setEnabled(tabs->currentIndex() + 1 < tabs->count());
+                position->setText(QString("%1 / %2").arg(tabs->currentIndex() + 1).arg(tabs->count()));
+            };
+            connect(previous, &QPushButton::clicked, &dialog, [tabs] { tabs->setCurrentIndex(tabs->currentIndex() - 1); });
+            connect(next, &QPushButton::clicked, &dialog, [tabs] { tabs->setCurrentIndex(tabs->currentIndex() + 1); });
+            connect(tabs, &QTabWidget::currentChanged, &dialog, [updatePosition](int) { updatePosition(); });
+            pageButtons->addWidget(previous); pageButtons->addStretch(); pageButtons->addWidget(position);
+            pageButtons->addStretch(); pageButtons->addWidget(next);
+            updatePosition(); layout->addLayout(pageButtons);
             auto *close = new QPushButton("닫기", &dialog);
             connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
             layout->addWidget(close);
@@ -593,6 +689,9 @@ class Window : public QMainWindow {
   private:
     void busy(bool value) {
         newProject->setEnabled(!value);
+        deleteProject->setEnabled(!value);
+        previousPage->setEnabled(!value && pages->currentIndex() > 0);
+        nextPage->setEnabled(!value && pages->currentIndex() < 2);
         projectList->setEnabled(!value);
         openWord->setEnabled(!value && QFileInfo::exists(output));
         createPreview->setEnabled(!value); loadSaved->setEnabled(!value);
@@ -633,7 +732,9 @@ class Window : public QMainWindow {
     QString root, output, modelPath, runDirectory, sessionConfigPath;
     bool previewOnly = false;
     QCheckBox *dispersion, *complexation;
-    QPushButton *openWord, *newProject;
+    QPushButton *openWord, *newProject, *deleteProject, *previousPage, *nextPage;
+    QStackedWidget *pages;
+    QLabel *pageLabel;
     QPushButton *createPreview, *loadSaved, *exportSaved;
     QJsonObject config, session;
     QVector<QCheckBox *> checks;

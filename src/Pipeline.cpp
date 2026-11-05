@@ -297,6 +297,7 @@ QJsonObject analyze(QJsonObject plan, const QJsonObject &config, const QString &
             issues << "Sheet component sums disagree with the displayed electronic or Gibbs energy";
         auto energyTable = siRelativeTable(energyRows, config["include_dispersion"].toBool(false),
                                            config["include_complexation"].toBool(false));
+        energyTable["source_rows"] = energyRows;
         energyTable["source"] = "sheet cached values with restored shared formulas in row cells";
         energyTable["component_checks"] = componentChecks;
         energyTable["si_component_check"] = checkedTerms != structureCount * 6 ? "incomplete"

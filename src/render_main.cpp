@@ -149,7 +149,7 @@ int main(int argc, char **argv) {
                         transforms << matrix;
                     }
                     const bool keepCH = rule["c_h_activation"].toBool();
-                    editor.configureGroup(molecules, labels, youngkly::displayHeading(section["project_heading"].toString()) + " / " + group["section"].toString(), keepCH, spinOptimization ? nullptr : &modes[reference], confirmed);
+                    editor.configureGroup(molecules, labels, youngkly::displayHeading(section["project_heading"].toString()) + " / " + group["section"].toString(), keepCH, spinOptimization ? nullptr : &modes[reference], interactive || confirmed);
                     app.processEvents();
                     // A bounding sphere includes all structures and all motion phases and remains safe under rotation.
                     QVector<QVector3D> all;
@@ -170,7 +170,7 @@ int main(int argc, char **argv) {
                     view.applyCameraState(initial);
                     if (!saved.isEmpty()) {
                         auto o = saved["options"].toObject();
-                        editor.restoreOptions(o["hide_ch"].toBool(), o["activation"].toBool(), o["shadows"].toBool(true), o["brightness"].toInt(135), o["shadow_strength"].toInt(24));
+                        editor.restoreOptions(o["hide_ch"].toBool(true), o["activation"].toBool(), o["shadows"].toBool(true), o["brightness"].toInt(135), o["shadow_strength"].toInt(24));
                         view.applyCameraState(saved["camera"].toObject());
                     }
                     if (interactive) {

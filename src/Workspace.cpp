@@ -3,6 +3,7 @@
 #include "Pipeline.h"
 #include "Sheet.h"
 #include "FutureWork.h"
+#include "RelativeTable.h"
 #include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
@@ -18,12 +19,57 @@
 
 namespace youngkly {
 QJsonArray reportSections(const QJsonObject &model, const QJsonObject &config) {
-    if (model.contains("sections"))
-        return model["sections"].toArray();
-    auto single = model;
-    single["project_heading"] = config["project_heading"];
-    single["project_id"] = "legacy";
-    return {single};
+    QJsonArray sections;
+    if (model.contains("sections")) sections = model["sections"].toArray();
+    else {
+        auto single = model;
+        single["project_heading"] = config["project_heading"];
+        single["project_id"] = "legacy";
+        sections = {single};
+    }
+    // Materialize report columns at output time so saved captures can be reused.
+    for (int i = 0; i < sections.size(); ++i) {
+        auto section = sections[i].toObject();
+        QMap<int, QJsonObject> sheetRows;
+        for (const auto &value : section["rows"].toArray()) {
+            const auto row = value.toObject(); sheetRows[row["sheet_row"].toInt()] = row;
+        }
+        auto groups = section["analyses"].toArray();
+        for (int j = 0; j < groups.size(); ++j) {
+            auto group = groups[j].toObject(); auto table = group["energy_table"].toObject();
+            if (table.isEmpty()) continue;
+            auto source = table["source_rows"].toArray();
+            // Older saved projects retain the full sheet cells even if optional columns were hidden.
+            if (source.isEmpty()) {
+                const auto ids = group["rows"].toArray();
+                const auto labels = group["structure_labels"].toArray();
+                const auto shown = table["rows"].toArray();
+                for (int k = 0; k < ids.size(); ++k) {
+                    const auto cells = sheetRows.value(ids[k].toInt())["cells"].toObject();
+                    if (cells.isEmpty()) { source = {}; break; }
+                    QJsonArray values{k < labels.size() ? labels[k] :
+                        k < shown.size() && !shown[k].toArray().isEmpty() ? shown[k].toArray()[0] : QJsonValue("")};
+                    for (const auto &column : {"L", "M", "N", "O", "P", "Q", "R", "S"}) {
+                        const auto raw = cells[column].toObject()["value"].toString();
+                        bool ok; double value = raw.toDouble(&ok);
+                        if (QString(column) == "R" && raw.trimmed().isEmpty()) { value = 0; ok = true; }
+                        values << (ok ? QJsonValue(value) : QJsonValue(QJsonValue::Null));
+                    }
+                    source << values;
+                }
+            }
+            if (!source.isEmpty()) {
+                const auto columns = siRelativeTable(source,
+                    config["include_dispersion"].toBool(table["include_dispersion"].toBool()),
+                    config["include_complexation"].toBool(table["include_complexation"].toBool()));
+                for (auto it = columns.begin(); it != columns.end(); ++it) table[it.key()] = it.value();
+                table["source_rows"] = source;
+                group["energy_table"] = table; groups[j] = group;
+            }
+        }
+        section["analyses"] = groups; sections[i] = section;
+    }
+    return sections;
 }
 int selectedRowCount(const QJsonObject &model) {
     if (!model.contains("sections"))
